@@ -18,4 +18,8 @@
 
 - (void)reload;
 
+/// 调整：壁纸引擎导入 .tendies 后，源文件会被删除，
+/// 需要把偏好里的路径改指到解压后的素材库目录（面板不需要用）。
+- (void)updateActivePackagePath:(NSString *)path;
+
 @end

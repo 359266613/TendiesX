@@ -68,6 +68,14 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
     return background ?: largest;
 }
 
+/// 目录/文件名安全化（避免路径穿越与非法字符）
+static NSString *TXSafeComponentName(NSString *component) {
+    NSCharacterSet *illegal = [NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"];
+    NSString *safe = [[component componentsSeparatedByCharactersInSet:illegal] componentsJoinedByString:@"_"];
+    safe = [safe stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return safe.length ? safe : @"package";
+}
+
 @interface TXTendiesPackage ()
 @property (nonatomic, copy,   readwrite) NSString *path;
 @property (nonatomic, copy,   readwrite) NSString *rootDirectory;
@@ -86,11 +94,98 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
 
 #pragma mark - 目录约定
 
+/// 素材库目录：导入后的解压结果长期放这里（不再依赖 Caches，避免被系统清理）
++ (NSString *)libraryDirectory {
+    static NSString *dir = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSString *candidate = [@"/var/mobile/Library/TendiesX" stringByAppendingPathComponent:@"Library"];
+        if ([fm createDirectoryAtPath:candidate withIntermediateDirectories:YES attributes:nil error:NULL]
+            || [fm fileExistsAtPath:candidate]) {
+            dir = candidate;
+            return;
+        }
+        NSString *fallback = [NSTemporaryDirectory() stringByAppendingPathComponent:@"TendiesX/Library"];
+        [fm createDirectoryAtPath:fallback withIntermediateDirectories:YES attributes:nil error:NULL];
+        dir = fallback;
+    });
+    return dir;
+}
+
+/// 投放目录：用 Filza 把 .tendies 丢进来，重载时自动导入并删除源文件
++ (NSArray<NSString *> *)inboxDirectories {
+    return @[ @"/var/mobile/Library/TendiesX", @"/var/mobile/Media/TendiesX" ];
+}
+
+/// 扫描投放目录里的 .tendies：解压到素材库，成功后删除源文件。
+/// 返回 「源文件路径 -> 素材库目录」 的映射，便于把偏好里的路径改指过去。
++ (NSDictionary<NSString *, NSString *> *)importPendingPackagesWithSourceRemoval:(BOOL)removeSource {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *library = [self libraryDirectory];
+    NSMutableDictionary<NSString *, NSString *> *mapping = [NSMutableDictionary dictionary];
+
+    for (NSString *inbox in [self inboxDirectories]) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:inbox error:NULL]) {
+            if (![[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+                continue;
+            }
+            NSString *source = [inbox stringByAppendingPathComponent:item];
+            NSString *name = TXSafeComponentName([item stringByDeletingPathExtension]);
+            NSString *destination = [library stringByAppendingPathComponent:name];
+            NSString *marker = [destination stringByAppendingPathComponent:@".unpacked"];
+
+            if ([fm fileExistsAtPath:marker]) {
+                // 已导入过：源文件留着没用，直接删掉
+                if (removeSource) {
+                    [fm removeItemAtPath:source error:NULL];
+                }
+                mapping[source] = destination;
+                continue;
+            }
+
+            TXLog(@"导入素材: %@ -> %@", item, destination);
+            TXZipArchive *archive = [TXZipArchive archiveWithContentsOfFile:source];
+            if (!archive) {
+                TXLog(@"导入失败（不是合法 zip）: %@", item);
+                continue;
+            }
+
+            [fm removeItemAtPath:destination error:NULL];
+            NSError *error = nil;
+            if (![archive extractToDirectory:destination error:&error]) {
+                TXLog(@"导入失败: %@", error.localizedDescription ?: @"未知错误");
+                continue;
+            }
+            [@"1" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+
+            if (removeSource) {
+                NSError *removeError = nil;
+                if ([fm removeItemAtPath:source error:&removeError]) {
+                    TXLog(@"已删除源文件: %@", item);
+                } else {
+                    TXLog(@"源文件删除失败: %@", removeError.localizedDescription);
+                }
+            }
+            mapping[source] = destination;
+        }
+    }
+    return mapping;
+}
+
 + (NSArray<NSString *> *)searchDirectories {
-    NSMutableArray<NSString *> *dirs = [NSMutableArray arrayWithObjects:
-                                        @"/var/mobile/Library/TendiesX",
-                                        @"/var/mobile/Media/TendiesX",
-                                        nil];
+    NSMutableArray<NSString *> *dirs = [NSMutableArray array];
+
+    // 1) 素材库（已解压，优先级最高）
+    NSString *library = [self libraryDirectory];
+    if (library.length) {
+        [dirs addObject:library];
+    }
+    // 2) 投放目录（还没导入的 .tendies）
+    [dirs addObjectsFromArray:[self inboxDirectories]];
+    // 3) Media 侧素材库
+    [dirs addObject:@"/var/mobile/Media/TendiesX/Library"];
+    // 4) 旧版解包缓存（兼容）
     NSString *cache = TXTendiesCacheRoot();
     if (cache.length) {
         [dirs addObject:cache];
@@ -178,15 +273,15 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
 
 #pragma mark - 解包
 
-/// .tendies(zip) -> 缓存目录，返回可用目录；失败返回 nil
+/// .tendies(zip) -> 素材库目录，返回可用目录；失败返回 nil
 - (NSString *)tx_unpackContainer:(NSString *)containerPath {
-    NSString *cacheRoot = TXTendiesCacheRoot();
+    NSString *cacheRoot = [TXTendiesPackage libraryDirectory];
     if (!cacheRoot.length) {
-        TXLog(@"找不到可写的解包缓存目录");
+        TXLog(@"找不到可写的素材库目录");
         return nil;
     }
 
-    NSString *name = [self tx_safeComponent:[[containerPath lastPathComponent] stringByDeletingPathExtension]];
+    NSString *name = TXSafeComponentName([[containerPath lastPathComponent] stringByDeletingPathExtension]);
     NSString *destination = [cacheRoot stringByAppendingPathComponent:name];
     NSFileManager *fm = NSFileManager.defaultManager;
 
@@ -224,12 +319,9 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
     return destination;
 }
 
-/// 目录名安全化（避免路径穿越与非法字符）
+/// 目录名安全化（转发到静态函数，保持旧调用点可用）
 - (NSString *)tx_safeComponent:(NSString *)component {
-    NSCharacterSet *illegal = [NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"];
-    NSString *safe = [[component componentsSeparatedByCharactersInSet:illegal] componentsJoinedByString:@"_"];
-    safe = [safe stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return safe.length ? safe : @"package";
+    return TXSafeComponentName(component);
 }
 
 #pragma mark - 递归扫描（不假设任何固定目录）

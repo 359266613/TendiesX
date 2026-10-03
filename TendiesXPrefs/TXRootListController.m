@@ -19,7 +19,14 @@
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
-static NSString *const kTXTendiesDirs[] = {
+/// 素材库目录（导入后的解压结果，优先级最高）
+static NSString *const kTXLibraryDirs[] = {
+    @"/var/mobile/Library/TendiesX/Library",
+    @"/var/mobile/Media/TendiesX/Library",
+    nil
+};
+/// 投放目录（用 Filza 把 .tendies 丢这里，Tweak 侧会自动导入并删掉源文件）
+static NSString *const kTXInboxDirs[] = {
     @"/var/mobile/Library/TendiesX",
     @"/var/mobile/Media/TendiesX",
     nil
@@ -65,6 +72,13 @@ static BOOL TXPrefBool(NSString *key, BOOL fallback) {
     return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : fallback;
 }
 
+/// 只发重载通知，不写任何键（让 SpringBoard 侧的 Tweak 立刻重新读盘 + 导入素材）
+static void TXNotifyReload(void) {
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         (__bridge CFStringRef)kTXReloadNotification,
+                                         NULL, NULL, YES);
+}
+
 #pragma mark - 扫描
 
 static NSString *TXDisplayName(NSString *path) {
@@ -77,22 +91,35 @@ static NSArray<NSString *> *TXScanPackages(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSString *> *found = [NSMutableArray array];
 
-    for (int i = 0; kTXTendiesDirs[i] != nil; i++) {
-        NSString *dir = kTXTendiesDirs[i];
+    // 1) 素材库：已解压的目录（不带 .tendies 后缀）
+    for (int i = 0; kTXLibraryDirs[i] != nil; i++) {
+        NSString *dir = kTXLibraryDirs[i];
+        NSMutableArray<NSString *> *inDir = [NSMutableArray array];
         for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
             NSString *full = [dir stringByAppendingPathComponent:item];
             BOOL isDir = NO;
-            if (![fm fileExistsAtPath:full isDirectory:&isDir]) {
-                continue;
-            }
-            if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"]
-                || (isDir && [item hasSuffix:@".tendies"])) {
-                [found addObject:full];
+            if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+                [inDir addObject:full];
             }
         }
+        [inDir sortUsingSelector:@selector(compare:)];
+        [found addObjectsFromArray:inDir];
     }
 
-    [found sortUsingSelector:@selector(compare:)];
+    // 2) 投放目录：还没被导入的 .tendies（点「导入 / 重新扫描素材」后会被解压并删除）
+    for (int i = 0; kTXInboxDirs[i] != nil; i++) {
+        NSString *dir = kTXInboxDirs[i];
+        NSMutableArray<NSString *> *inDir = [NSMutableArray array];
+        for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
+            if (![[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+                continue;
+            }
+            [inDir addObject:[dir stringByAppendingPathComponent:item]];
+        }
+        [inDir sortUsingSelector:@selector(compare:)];
+        [found addObjectsFromArray:inDir];
+    }
+
     return found;
 }
 
@@ -229,11 +256,14 @@ static NSArray *gTXRootSpecifiers = nil;
                                                            detail:[TXPackageListController class]
                                                              cell:TXCellLink edit:nil];
         [specs addObject:picker];
-        [self tx_buttonNamed:@"重新扫描目录" action:@selector(tx_rescan:) to:specs];
+        [self tx_buttonNamed:@"导入 / 重新扫描素材" action:@selector(tx_rescan:) to:specs];
 
         #pragma mark 说明
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"说明"]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"把 .tendies 放到 /var/mobile/Library/TendiesX/，再点「重新扫描目录」"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/，再点上面的按钮"
+                                                       target:nil set:nil get:nil detail:nil
+                                                         cell:TXCellStaticText edit:nil]];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"导入时会自动解压到 Library/ 并删除 .tendies 源文件"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"运行日志：/var/mobile/Library/Logs/TendiesX.log"
@@ -285,15 +315,29 @@ static NSArray *gTXRootSpecifiers = nil;
     [self reloadSpecifiers];
 }
 
+// 调整：这个按钮现在兼职「导入」—— 先发通知让 SpringBoard 侧的 Tweak 立刻
+// 扫描投放目录、解压新素材并删除 .tendies 源文件，再延迟刷新列表把新素材显示出来。
 - (void)tx_rescan:(PSSpecifier *)specifier {
+    TXNotifyReload();
+    TXLog(@"面板: 已请求导入 / 重新扫描素材");
+
     gTXRootSpecifiers = nil;
     gTXPackageSpecifiers = nil;
     gTXPackagePaths = nil;
     [self reloadSpecifiers];
-    TXLog(@"面板: 重新扫描目录完成");
+
+    __weak TXRootListController *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        gTXRootSpecifiers = nil;
+        gTXPackageSpecifiers = nil;
+        gTXPackagePaths = nil;
+        [weakSelf reloadSpecifiers];
+        TXLog(@"面板: 导入 / 重新扫描完成");
+    });
 }
 
-// 「重新扫描目录」等按钮走这里（按钮 cell 的 action 会带 specifier 参数）
+// 按钮 cell 的 action 会带 specifier 参数，这里兜一个无参版本
 - (void)tx_rescan { [self tx_rescan:nil]; }
 
 #pragma mark - 开关读写（get/set 选择器 + 控制器级读写，两条路都覆盖）

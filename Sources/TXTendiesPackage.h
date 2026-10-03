@@ -41,8 +41,23 @@ extern NSString *const TXWallpaperKindUnknown;
 + (instancetype)packageAtPath:(NSString *)path;
 
 #pragma mark - 目录约定（设置面板也用它）
+//
+//  投放目录  /var/mobile/Library/TendiesX   ← 用 Filza 把 .tendies 丢进来
+//  素材库    /var/mobile/Library/TendiesX/Library/<名字>/  ← 自动解压结果，长期保留
+//  备用投放  /var/mobile/Media/TendiesX
+//
 
-/// 扫描目录：/var/mobile/Library/TendiesX、/var/mobile/Media/TendiesX、解包缓存目录
+/// 素材库目录（导入后的解压结果）
++ (NSString *)libraryDirectory;
+
+/// 投放目录列表
++ (NSArray<NSString *> *)inboxDirectories;
+
+/// 扫描投放目录里的 .tendies：解压到素材库，成功后删除源文件。
+/// 返回「源文件路径 -> 素材库目录」映射（用于把偏好改指到解压目录）。
++ (NSDictionary<NSString *, NSString *> *)importPendingPackagesWithSourceRemoval:(BOOL)removeSource;
+
+/// 扫描目录（素材库 → 投放目录 → Media 素材库 → 旧版缓存）
 + (NSArray<NSString *> *)searchDirectories;
 
 /// 扫描目录里所有可用的 .tendies（zip 文件或已解包目录），按路径排序

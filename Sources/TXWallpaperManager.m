@@ -201,8 +201,21 @@ static void TXDumpHierarchyOnce(UIView *view) {
 }
 
 - (void)reloadFromDisk {
+    // 调整：先把投放目录里的 .tendies 导入（解压到素材库并删掉源文件）。
+    // 这样用 Filza 丢进目录的素材，重载一次就变成可用壁纸，目录里不留 .tendies 原文件。
+    NSDictionary<NSString *, NSString *> *imported =
+        [TXTendiesPackage importPendingPackagesWithSourceRemoval:YES];
+
     TXPreferences *prefs = TXPreferences.sharedInstance;
     NSString *path = prefs.activePackagePath;
+
+    // 当前选中的正好是刚被导入的 .tendies（源文件已删）→ 改指到素材库目录
+    NSString *remapped = path.length ? imported[path] : nil;
+    if (remapped.length) {
+        TXLog(@"当前壁纸已导入，改指素材库: %@", TXShortPath(remapped));
+        [prefs updateActivePackagePath:remapped];
+        path = remapped;
+    }
 
     if (!path.length) {
         NSArray<NSString *> *candidates = [TXTendiesPackage availablePackagePaths];

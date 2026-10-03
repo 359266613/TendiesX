@@ -50,6 +50,16 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
     return shared;
 }
 
+- (void)updateActivePackagePath:(NSString *)path {
+    NSString *value = path.length ? path : @"";
+    CFPreferencesSetAppValue(CFSTR("ActivePackagePath"),
+                             (__bridge CFPropertyListRef)value,
+                             (__bridge CFStringRef)kTXPrefsDomain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kTXPrefsDomain);
+    self.activePackagePath = path.length ? path : nil;
+    TXLog(@"偏好改写 ActivePackagePath = %@", path.length ? path : @"(空)");
+}
+
 - (void)reload {
     self.enabled            = TXCopyBoolPref(@"Enabled", YES);
     self.interactionEnabled = TXCopyBoolPref(@"InteractionEnabled", YES);
