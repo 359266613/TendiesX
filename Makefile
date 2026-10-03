@@ -8,26 +8,26 @@ export THEOS_PACKAGE_SCHEME
 
 include $(THEOS)/makefiles/common.mk
 
-# ---------- 注入 SpringBoard 的壁纸引擎 ----------
+# ---------- SpringBoard 侧 worker：只做「解包 + 装 descriptor」----------
+# route A：不 hook 任何私有 API、不渲染任何图层，
+# 所以不需要任何私有头文件，也不需要 QuartzCore / AVFoundation / Metal。
 TWEAK_NAME = TendiesX
-TendiesX_FILES = $(wildcard Hooks/*.xm) $(wildcard Sources/*.m)
+TendiesX_FILES = Hooks/Worker.xm \
+	Sources/TXLogger.m \
+	Sources/TXPreferences.m \
+	Sources/TXZipArchive.m \
+	Sources/TXPosterInstaller.m
 TendiesX_CFLAGS = -fobjc-arc \
-	-I./Headers \
 	-I./Sources \
 	-Wno-error \
-	-Wno-deprecated-declarations \
-	-Wno-objc-missing-super-calls \
-	-Wno-unused-variable
-TendiesX_FRAMEWORKS = Foundation UIKit QuartzCore CoreVideo CoreMotion CoreImage ImageIO Metal MetalKit AVFoundation
+	-Wno-deprecated-declarations
+TendiesX_FRAMEWORKS = Foundation UIKit
 TendiesX_LIBRARIES = z
-# 私有类（PBUIWallpaperView 等）不在 SDK stub 里：用动态查找，
-# 否则 `SomePrivateClass.class` 会在链接期产生 _OBJC_CLASS_$_xxx 未定义符号
-TendiesX_LDFLAGS = -undefined dynamic_lookup
 
-# ---------- 设置面板（单 deb 双产物：tweak.mk + bundle.mk） ----------
+# ---------- 设置面板（单 deb 双产物）----------
+# 面板只写偏好 + 发通知，真正的文件操作在 SpringBoard 侧（避开沙盒）
 BUNDLE_NAME = TendiesXPrefs
-TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m \
-	Sources/TXPosterInstaller.m Sources/TXPosterStoreProbe.m
+TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m
 TendiesXPrefs_CFLAGS = -fobjc-arc \
 	-I./TendiesXPrefs \
 	-I./Sources \

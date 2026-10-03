@@ -3,9 +3,10 @@ Name: TendiesX
 Version: 1.0.0
 Architecture: iphoneos-arm
 Description: .tendies 交互壁纸引擎（iOS 15.0 - 17.3.1）。
- * 1.自动扫描并解析 .tendies 容器（自研 zip 解包，无外部依赖）
- * 2.注入锁屏 / 主屏壁纸视图，视频型壁纸无缝循环播放
- * 3.设置面板可选择壁纸、开关功能、触摸交互与陀螺仪视差
+ * 1.把 .tendies 安装进系统海报库（PosterBoard），由系统原生渲染，
+     主屏 / 锁屏 / 息屏显示 / 视差 / 景深全部自动支持
+ * 2.自研 zip 解包，无外部依赖；不 hook 任何私有 API、不常驻渲染、不占性能
+ * 3.设置面板：选择素材、一键安装、安装结果提示
 Maintainer: Axs
 Author: Axs
 Section: Axs-Tweaks

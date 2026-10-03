@@ -15,7 +15,6 @@
 
 #import "TXPreferencesUI.h"
 #import "TXLogger.h"
-#import "TXPosterInstaller.h"
 #import <objc/runtime.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -25,9 +24,6 @@ static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
 ///   <根>/xxx.tendies     投放中的压缩包
 ///   <根>/xxx.tendies/    解压后的素材目录（同名，但是目录）
 static NSString *const kTXBaseDir = @"/var/mobile/Library/TendiesX";
-/// 「自动」选项对应的值（空串 = 让 Tweak 自动发现）
-static NSString *const kTXAutoValue = @"";
-static NSString *const kTXAutoTitle = @"自动（扫描到的第一个）";
 
 #pragma mark - specifiers 写回（面板白屏的关键）
 
@@ -94,44 +90,24 @@ static NSString *TXDisplayName(NSString *path) {
     return dash.location == NSNotFound ? name : [name substringToIndex:dash.location];
 }
 
-/// xxx.tendies 是「目录」的才是可用素材；是「压缩包」的属于还没导入
+/// 素材目录里的全部 .tendies：压缩包和已解包目录都算（route A 安装时自动解包）
 static NSArray<NSString *> *TXScanPackages(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSString *> *found = [NSMutableArray array];
-
-    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXBaseDir error:NULL]) {
-        if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"] == NO) {
-            continue;
-        }
-        NSString *full = [kTXBaseDir stringByAppendingPathComponent:item];
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
-            [found addObject:full];
-        }
-    }
-
-    [found sortUsingSelector:@selector(compare:)];
-    return found;
-}
-
-/// 还没导入的压缩包数量（只用于提示行）
-static NSUInteger TXPendingImportCount(void) {
-    NSFileManager *fm = NSFileManager.defaultManager;
-    NSUInteger count = 0;
 
     for (NSString *item in [fm contentsOfDirectoryAtPath:kTXBaseDir error:NULL]) {
         if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"] == NO
             || [item hasPrefix:@"."]) {
             continue;
         }
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:[kTXBaseDir stringByAppendingPathComponent:item]
-                     isDirectory:&isDir] && !isDir) {
-            count++;
-        }
+        [found addObject:[kTXBaseDir stringByAppendingPathComponent:item]];
     }
-    return count;
+
+    [found sortUsingSelector:@selector(compare:)];
+    return found;
 }
+
+// route A 没有单独的"导入"步骤：安装时自动解包，所以不再需要待导入计数
 
 #pragma mark - 壁纸列表（自建二级页）
 
@@ -149,16 +125,10 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
         NSMutableArray *specs = [NSMutableArray array];
         NSMutableArray<NSString *> *paths = [NSMutableArray array];
 
-        NSString *current = TXPrefGet(@"ActivePackagePath");
+        NSString *current = TXPrefGet(@"SourcePath");
         NSArray<NSString *> *packages = TXScanPackages();
 
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"点一下即可切换"]];
-
-        if (TXPendingImportCount()) {
-            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"检测到未导入的 .tendies，请回上一页导入"
-                                                           target:nil set:nil get:nil detail:nil
-                                                             cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
-        }
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"点一下选中要安装的素材"]];
 
         for (NSString *path in packages) {
             BOOL selected = [path isEqualToString:current];
@@ -172,14 +142,11 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
             [paths addObject:path];
         }
 
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"其它"]];
-
-        PSSpecifier *autoSpec = [PSSpecifier preferenceSpecifierNamed:
-                                 [NSString stringWithFormat:@"%@%@",
-                                  (!current.length ? @"✓ " : @""), kTXAutoTitle]
-                                                              target:nil set:nil get:nil detail:nil
-                                                                cell:TXCellType(@"PSTitleValueCell", TXCellTitle) edit:nil];
-        [specs addObject:autoSpec];
+        if (!paths.count) {
+            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"还没有素材。回上一页用「文件」App 选一个 .tendies"
+                                                           target:nil set:nil get:nil detail:nil
+                                                             cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
+        }
 
         gTXPackagePaths = [paths copy];
         gTXPackageSpecifiers = [specs copy];
@@ -191,7 +158,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"选择壁纸";
+    self.title = @"选择素材";
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -205,21 +172,13 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-    NSString *path = nil;
-    if (indexPath.section == 0) {
-        if (indexPath.row < (NSInteger)gTXPackagePaths.count) {
-            path = gTXPackagePaths[indexPath.row];
-        }
-    } else {
-        path = kTXAutoValue;
-    }
-
-    if (path == nil) {
+    if (indexPath.section != 0 || indexPath.row >= (NSInteger)gTXPackagePaths.count) {
         return;
     }
+    NSString *path = gTXPackagePaths[indexPath.row];
 
-    TXPrefSet(@"ActivePackagePath", path);
-    TXLog(@"面板: ActivePackagePath -> %@", path.length ? path : @"(自动)");
+    TXPrefSet(@"SourcePath", path);
+    TXLog(@"面板: SourcePath -> %@", path);
 
     // 不自动返回：留在列表里把 ✓ 刷出来，用户能看到确实切过去了
     gTXPackageSpecifiers = nil;
@@ -262,36 +221,28 @@ static NSArray *gTXRootSpecifiers = nil;
 
         #pragma mark 开关
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"开关"]];
-        [self tx_switchNamed:@"启用"       key:@"Enabled"            to:specs];
-        [self tx_switchNamed:@"触摸交互"   key:@"InteractionEnabled" to:specs];
-        [self tx_switchNamed:@"陀螺仪视差" key:@"ParallaxEnabled"    to:specs];
-        // 默认关：挂到副本宿主会让系统同时跑多套动画，表现为严重卡顿
-        [self tx_switchNamed:@"兜底挂载（仅排查用）" key:@"MountFallback" to:specs];
+        [self tx_switchNamed:@"启用" key:@"Enabled" to:specs];
 
-        #pragma mark 壁纸（二级页）
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"壁纸"]];
-        NSString *current = TXPrefGet(@"ActivePackagePath");
+        #pragma mark 素材（二级页）
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"素材"]];
+        NSString *current = TXPrefGet(@"SourcePath");
         PSSpecifier *picker = [PSSpecifier preferenceSpecifierNamed:
-                               [NSString stringWithFormat:@"选择壁纸（当前：%@）",
-                                current.length ? TXDisplayName(current) : @"自动"]
+                               [NSString stringWithFormat:@"选择素材（当前：%@）",
+                                current.length ? TXDisplayName(current) : @"无"]
                                                              target:nil set:nil get:nil
                                                            detail:[TXPackageListController class]
                                                              cell:TXCellType(@"PSLinkCell", TXCellLink) edit:nil];
         [specs addObject:picker];
 
-        #pragma mark 导入素材
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"导入素材"]];
+        #pragma mark 安装
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"安装到系统海报库"]];
+        [self tx_buttonNamed:@"安装选中的素材" action:@selector(tx_installPoster:) to:specs];
         [self tx_buttonNamed:@"从「文件」App 选择 .tendies" action:@selector(tx_pickFiles:) to:specs];
         [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
-        // route A：装进系统海报库，由 PosterBoard 原生渲染（锁屏/主屏/AOD 全由系统负责）
-        [self tx_buttonNamed:@"安装到系统海报库（推荐）" action:@selector(tx_installPoster:) to:specs];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；动画由系统渲染"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"解压后是 /var/mobile/Library/TendiesX/名字.tendies/（同名目录），不留压缩包"
-                                                       target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"也可以直接用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/ 再点重新扫描"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"素材目录：/var/mobile/Library/TendiesX/（也可用 Filza 直接丢 .tendies）"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
 
@@ -370,27 +321,31 @@ static NSArray *gTXRootSpecifiers = nil;
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-// 把当前选中 .tendies 的 descriptor 写进 PosterBoard 的海报存储。
-// 之后渲染完全由系统负责：不会卡（不在我们进程里画），也不会"松手就消失"。
+// 真正的文件操作在 SpringBoard 侧完成（面板沙盒写不了别的 App 容器），
+// 这里只发通知，然后回读 worker 写下的结果。之后渲染完全由系统负责：
+// 不会卡（不在我们进程里画），也不会"松手就消失"。
 - (void)tx_installPoster:(PSSpecifier *)specifier {
-    NSString *path = TXPrefGet(@"ActivePackagePath");
+    NSString *path = TXPrefGet(@"SourcePath");
     if (!path.length) {
-        [self tx_alertMessage:@"先在「壁纸」里选一个已导入的 .tendies"];
+        [self tx_alertMessage:@"先在「素材」里选一个 .tendies"];
         return;
     }
-    TXLog(@"面板: 开始安装到系统海报库: %@", path);
+    TXLog(@"面板: 请求安装 %@", path);
 
-    NSArray<NSString *> *installed =
-        [TXPosterInstaller.sharedInstaller installPackageAtPath:path];
+    TXPrefSet(@"LastInstallMessage", @"");
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         CFSTR("com.axs.tendiesx/InstallPoster"),
+                                         NULL, NULL, YES);
 
-    if (installed.count) {
-        [self tx_alertMessage:[NSString stringWithFormat:
-            @"已安装 %lu 个海报。\n\n下一步：设置 → 墙纸 → 添加新墙纸 → 收藏，"
-            @"选中它即可。锁屏/主屏动画全部由系统渲染。",
-            (unsigned long)installed.count]];
-    } else {
-        [self tx_alertMessage:@"安装失败。请看日志 /var/mobile/Library/Logs/TendiesX.log 里的 [A] 开头的行"];
-    }
+    __weak TXRootListController *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSString *message = TXPrefGet(@"LastInstallMessage");
+        [weakSelf tx_alertMessage:[NSString stringWithFormat:
+            @"%@\n\n下一步：设置 → 墙纸 → 添加新墙纸 → 收藏，选中它即可。\n"
+            @"详情见日志 /var/mobile/Library/Logs/TendiesX.log",
+            message.length ? message : @"已发出安装请求，但没收到结果（看日志确认）"]];
+    });
 }
 
 - (void)tx_installPoster { [self tx_installPoster:nil]; }
@@ -413,6 +368,7 @@ static NSArray *gTXRootSpecifiers = nil;
  didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSUInteger copied = 0;
+    NSString *lastDestination = nil;
 
     for (NSURL *url in urls) {
         NSString *name = url.lastPathComponent;
@@ -426,15 +382,17 @@ static NSArray *gTXRootSpecifiers = nil;
         NSError *error = nil;
         if ([fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:destination] error:&error]) {
             copied++;
+            lastDestination = destination;
         } else {
             TXLog(@"面板: 复制失败 %@（%@）", name, error.localizedDescription);
         }
     }
 
-    TXLog(@"面板: 已放入投放目录 %lu 个，请求 Tweak 导入解压", (unsigned long)copied);
-    if (copied) {
-        TXNotifyReload();
+    TXLog(@"面板: 已放入素材目录 %lu 个", (unsigned long)copied);
+    if (copied && lastDestination) {
+        TXPrefSet(@"SourcePath", lastDestination);   // 直接选中刚放入的，省一步
     }
+    TXNotifyReload();
     [self tx_refreshAfterImport];
 }
 

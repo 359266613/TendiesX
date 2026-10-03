@@ -80,11 +80,9 @@ jobs:
     - name: Build Package
       run: |
         export THEOS="$GITHUB_WORKSPACE/theos-roothide"
-        export CPATH="$GITHUB_WORKSPACE/Headers:$GITHUB_WORKSPACE/Sources"
-        export OBJC_INCLUDE_PATH="$GITHUB_WORKSPACE/Headers:$GITHUB_WORKSPACE/Sources"
-        export C_INCLUDE_PATH="$GITHUB_WORKSPACE/Headers:$GITHUB_WORKSPACE/Sources"
-        echo "== headers dir =="
-        ls -l "$GITHUB_WORKSPACE/Headers"
+        export CPATH="$GITHUB_WORKSPACE/Sources"
+        export OBJC_INCLUDE_PATH="$GITHUB_WORKSPACE/Sources"
+        export C_INCLUDE_PATH="$GITHUB_WORKSPACE/Sources"
         echo "CPATH=$CPATH"
         SCHEME="${{ matrix.package_scheme }}"
         if [ -n "$SCHEME" ]; then
