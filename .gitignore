@@ -17,3 +17,7 @@ xcuserdata/
 .vscode/
 .idea/
 *.swp
+
+# 设备日志（从手机拷出来的，不要进仓库）
+*.log
+TendiesX.log*

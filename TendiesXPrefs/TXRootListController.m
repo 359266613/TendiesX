@@ -5,6 +5,7 @@
 //
 
 #import "TXPreferencesUI.h"
+#import "TXLogger.h"
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
@@ -49,7 +50,9 @@ static NSArray<NSString *> *TXScanPackages(void) {
 
     for (int i = 0; kTXTendiesDirs[i] != nil; i++) {
         NSString *dir = kTXTendiesDirs[i];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
+        NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:dir error:NULL];
+        TXLog(@"面板扫描 %@ -> %lu 项", dir, (unsigned long)items.count);
+        for (NSString *item in items) {
             NSString *full = [dir stringByAppendingPathComponent:item];
             BOOL isDir = NO;
             if (![fm fileExistsAtPath:full isDirectory:&isDir]) {
@@ -77,6 +80,7 @@ static NSArray *gTXPackageSpecifiers = nil;
 
 - (NSArray *)specifiers {
     if (!gTXPackageSpecifiers) {
+        TXLog(@"面板: 开始构建壁纸列表 specifiers");
         NSMutableArray *specs = [NSMutableArray array];
         NSString *current = TXPrefGet(@"ActivePackagePath");
 
@@ -84,10 +88,9 @@ static NSArray *gTXPackageSpecifiers = nil;
 
         NSArray<NSString *> *packages = TXScanPackages();
         if (!packages.count) {
-            PSSpecifier *empty = [PSSpecifier preferenceSpecifierNamed:@"（没扫描到 .tendies，请先放到 /var/mobile/Library/TendiesX/）"
-                                                               target:nil set:nil get:nil detail:nil
-                                                                 cell:TXCellStaticText edit:nil];
-            [specs addObject:empty];
+            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"（没扫描到 .tendies，请先放到 /var/mobile/Library/TendiesX/）"
+                                                           target:nil set:nil get:nil detail:nil
+                                                             cell:TXCellStaticText edit:nil]];
         }
 
         for (NSString *path in packages) {
@@ -106,15 +109,18 @@ static NSArray *gTXPackageSpecifiers = nil;
             [specs addObject:spec];
         }
 
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"设为自动（取扫描到的第一个）"]];
-        PSSpecifier *autoSpec = [PSSpecifier preferenceSpecifierNamed:@"自动"
-                                                              target:self set:nil get:nil detail:nil
-                                                                cell:TXCellButton edit:nil];
-        [autoSpec setButtonAction:@selector(tx_pickPackage:)];
-        [autoSpec setProperty:@"自动" forKey:@"txPackagePath"];
+        PSSpecifier *autoSpec = [PSSpecifier groupSpecifierWithName:@"设为自动（取扫描到的第一个）"];
         [specs addObject:autoSpec];
 
+        PSSpecifier *autoCell = [PSSpecifier preferenceSpecifierNamed:@"自动"
+                                                              target:self set:nil get:nil detail:nil
+                                                                cell:TXCellButton edit:nil];
+        [autoCell setButtonAction:@selector(tx_pickPackage:)];
+        [autoCell setProperty:@"自动" forKey:@"txPackagePath"];
+        [specs addObject:autoCell];
+
         gTXPackageSpecifiers = specs;
+        TXLog(@"面板: 壁纸列表构建完成，%lu 个 specifier", (unsigned long)specs.count);
     }
     return gTXPackageSpecifiers;
 }
@@ -124,12 +130,17 @@ static NSArray *gTXPackageSpecifiers = nil;
     self.title = @"选择壁纸";
 }
 
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self reloadSpecifiers];
+}
+
 - (void)tx_pickPackage:(PSSpecifier *)specifier {
     NSString *path = [specifier propertyForKey:@"txPackagePath"];
     NSString *value = [path isEqualToString:@"自动"] ? @"" : path;
 
     TXPrefSet(@"ActivePackagePath", value);
-    NSLog(@"[TendiesX] ActivePackagePath -> %@", value);
+    TXLog(@"面板: ActivePackagePath -> %@", value.length ? value : @"(自动)");
 
     gTXPackageSpecifiers = nil;
     [self reloadSpecifiers];
@@ -152,8 +163,14 @@ static NSArray *gTXRootSpecifiers = nil;
 
 @implementation TXRootListController
 
+/// 能打出来就说明 bundle 的二进制已被 Settings 加载，类可用
++ (void)load {
+    TXLog(@"======== TendiesXPrefs bundle 已加载，TXRootListController 可用 ========");
+}
+
 - (NSArray *)specifiers {
     if (!gTXRootSpecifiers) {
+        TXLog(@"面板: 开始构建根 specifiers");
         NSMutableArray *specs = [NSMutableArray array];
 
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"开关"]];
@@ -174,14 +191,13 @@ static NSArray *gTXRootSpecifiers = nil;
 
         NSString *current = TXPrefGet(@"ActivePackagePath");
         NSString *currentName = current.length ? TXDisplayName(current) : @"自动";
-        PSSpecifier *picker = [PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"选择壁纸（当前：%@）", currentName]
-                                                            target:self
-                                                               set:nil
-                                                               get:nil
-                                                            detail:[TXPackageListController class]
-                                                              cell:TXCellLink
-                                                              edit:nil];
-        [specs addObject:picker];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"选择壁纸（当前：%@）", currentName]
+                                                       target:self
+                                                          set:nil
+                                                          get:nil
+                                                       detail:[TXPackageListController class]
+                                                         cell:TXCellLink
+                                                         edit:nil]];
 
         PSSpecifier *rescan = [PSSpecifier preferenceSpecifierNamed:@"重新扫描目录"
                                                             target:self set:nil get:nil detail:nil
@@ -191,7 +207,7 @@ static NSArray *gTXRootSpecifiers = nil;
 
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"说明"]];
 
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"把 .tendies 文件放到 /var/mobile/Library/TendiesX/，再回到这里点「重新扫描目录」"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"把 .tendies 放到 /var/mobile/Library/TendiesX/，再回这里点「重新扫描目录」"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
 
@@ -200,6 +216,7 @@ static NSArray *gTXRootSpecifiers = nil;
                                                          cell:TXCellStaticText edit:nil]];
 
         gTXRootSpecifiers = specs;
+        TXLog(@"面板: 根 specifiers 构建完成，%lu 个", (unsigned long)specs.count);
     }
     return gTXRootSpecifiers;
 }
@@ -217,30 +234,41 @@ static NSArray *gTXRootSpecifiers = nil;
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"TendiesX";
+    TXLog(@"面板: viewDidLoad");
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    TXLog(@"面板: viewWillAppear，当前 specifiers=%lu", (unsigned long)[self specifiers].count);
+    // 每次进入都重建一次，避免 PSListController 缓存了空数组导致白屏
+    [self reloadSpecifiers];
 }
 
 - (void)tx_rescan:(PSSpecifier *)specifier {
     gTXRootSpecifiers = nil;
     gTXPackageSpecifiers = nil;
     [self reloadSpecifiers];
-    NSLog(@"[TendiesX] 重新扫描目录完成");
+    TXLog(@"面板: 重新扫描目录完成");
 }
 
 #pragma mark - 开关读写
 
-- (id)tx_getEnabled:(PSSpecifier *)specifier   { return @(TXPrefBool(@"Enabled", YES)); }
+- (id)tx_getEnabled:(PSSpecifier *)specifier     { return @(TXPrefBool(@"Enabled", YES)); }
 - (id)tx_getInteraction:(PSSpecifier *)specifier { return @(TXPrefBool(@"InteractionEnabled", YES)); }
-- (id)tx_getParallax:(PSSpecifier *)specifier  { return @(TXPrefBool(@"ParallaxEnabled", YES)); }
+- (id)tx_getParallax:(PSSpecifier *)specifier    { return @(TXPrefBool(@"ParallaxEnabled", YES)); }
 
 - (void)tx_setEnabled:(id)value specifier:(PSSpecifier *)specifier {
     TXPrefSet(@"Enabled", value);
     gTXRootSpecifiers = nil;
+    TXLog(@"面板: Enabled -> %@", value);
 }
 - (void)tx_setInteraction:(id)value specifier:(PSSpecifier *)specifier {
     TXPrefSet(@"InteractionEnabled", value);
+    TXLog(@"面板: InteractionEnabled -> %@", value);
 }
 - (void)tx_setParallax:(id)value specifier:(PSSpecifier *)specifier {
     TXPrefSet(@"ParallaxEnabled", value);
+    TXLog(@"面板: ParallaxEnabled -> %@", value);
 }
 
 @end

@@ -20,8 +20,11 @@ TendiesX_LIBRARIES = z
 
 # ---------- 设置面板 ----------
 BUNDLE_NAME = TendiesXPrefs
-TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m
-TendiesXPrefs_CFLAGS = -fobjc-arc -I$(THEOS_PROJECT_DIR)/TendiesXPrefs -Wno-error
+TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m
+TendiesXPrefs_CFLAGS = -fobjc-arc \
+	-I$(THEOS_PROJECT_DIR)/TendiesXPrefs \
+	-I$(THEOS_PROJECT_DIR)/Sources \
+	-Wno-error
 TendiesXPrefs_FRAMEWORKS = Foundation UIKit
 TendiesXPrefs_LDFLAGS = -undefined dynamic_lookup
 TendiesXPrefs_INSTALL_PATH = /Library/PreferenceBundles

@@ -1,7 +1,7 @@
 //
 //  Wallpaper.xm
 //  Hook 层：只做「取实例 / 转发调用」，业务全在 TXWallpaperManager。
-//  所有方法签名都来自 Headers/Private 下清洗过的私有头。
+//  方法签名来自 Headers/TXWallpaper.h（手写最小声明）。
 //
 
 #import "TendiesX.h"
@@ -101,6 +101,6 @@
         TXLog(@"警告: 本系统没有 PBUIWallpaperView，壁纸 hook 不会生效");
     }
 
-    // 触发一次加载，把偏好和 .tendies 解析结果打进日志
-    [TXWallpaperManager.sharedManager reloadFromDisk];
+    // sharedManager 首次访问时内部就会 reloadFromDisk，把偏好与解析结果打进日志
+    (void)TXWallpaperManager.sharedManager;
 }
