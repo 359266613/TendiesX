@@ -30,6 +30,7 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
 @property (nonatomic, copy,   readwrite) NSString *activePackagePath;
 @property (nonatomic, assign, readwrite) BOOL interactionEnabled;
 @property (nonatomic, assign, readwrite) BOOL parallaxEnabled;
+@property (nonatomic, assign, readwrite) BOOL mountFallbackEnabled;
 @end
 
 @implementation TXPreferences
@@ -64,13 +65,15 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
     self.enabled            = TXCopyBoolPref(@"Enabled", YES);
     self.interactionEnabled = TXCopyBoolPref(@"InteractionEnabled", YES);
     self.parallaxEnabled    = TXCopyBoolPref(@"ParallaxEnabled", YES);
+    // 默认 NO：找不到主容器就不挂，避免多套 CAAML 同时跑把设备拖卡
+    self.mountFallbackEnabled = TXCopyBoolPref(@"MountFallback", NO);
 
     id path = TXCopyPref(@"ActivePackagePath");
     self.activePackagePath = [path isKindOfClass:NSString.class] && [path length] > 0 ? path : nil;
 
-    TXLog(@"偏好读取 [%@]: Enabled=%d Interaction=%d Parallax=%d ActivePackagePath=%@",
+    TXLog(@"偏好读取 [%@]: Enabled=%d Interaction=%d Parallax=%d 兜底挂载=%d ActivePackagePath=%@",
           kTXPrefsDomain, self.enabled, self.interactionEnabled, self.parallaxEnabled,
-          self.activePackagePath ?: @"(空)");
+          self.mountFallbackEnabled, self.activePackagePath ?: @"(空)");
 }
 
 @end

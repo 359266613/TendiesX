@@ -262,6 +262,8 @@ static NSArray *gTXRootSpecifiers = nil;
         [self tx_switchNamed:@"启用"       key:@"Enabled"            to:specs];
         [self tx_switchNamed:@"触摸交互"   key:@"InteractionEnabled" to:specs];
         [self tx_switchNamed:@"陀螺仪视差" key:@"ParallaxEnabled"    to:specs];
+        // 默认关：挂到副本宿主会让系统同时跑多套动画，表现为严重卡顿
+        [self tx_switchNamed:@"兜底挂载（仅排查用）" key:@"MountFallback" to:specs];
 
         #pragma mark 壁纸（二级页）
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"壁纸"]];

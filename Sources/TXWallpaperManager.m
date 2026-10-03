@@ -429,12 +429,31 @@ static void TXDumpHierarchyOnce(UIView *view) {
 
     TXPreferences *prefs = TXPreferences.sharedInstance;
     if (!prefs.enabled) {
+        // 关掉时不只是"不挂载"，已挂的也要拆掉，否则旧渲染层会一直占着 GPU
+        if (self.renderer) {
+            TXLog(@"总开关已关，拆除渲染层");
+            [self.renderer removeFromSuperview];
+            self.renderer = nil;
+            self.rendererHost = nil;
+            self.rendererHostRank = 0;
+        }
         [self tx_logSkipOnce:@"跳过挂载: 总开关 Enabled=NO"];
         return;
     }
     if (!self.activePackage) {
         [self tx_logSkipOnce:[NSString stringWithFormat:@"跳过挂载: 无可用 .tendies，ActivePackagePath=%@",
                              prefs.activePackagePath.length ? TXShortPath(prefs.activePackagePath) : @"(空)"]];
+        return;
+    }
+
+    //  安全闸门：只允许挂在「主壁纸容器」上。
+    //  挂到副本宿主（PBUIFakeBlurView / PBUISnapshotReplicaView / PBUIPortalReplicaEffectView）
+    //  既看不见，又会让系统同时跑多套 CAAML 动画 —— 这正是之前"手机很卡"的直接原因。
+    //  需要排查时可在设置面板打开「兜底挂载」。
+    if (self.containerHost != host && !prefs.mountFallbackEnabled) {
+        [self tx_logSkipOnce:[NSString stringWithFormat:
+                              @"已跳过宿主 %@(rank=%d)：未找到主壁纸容器，兜底挂载默认关闭",
+                              NSStringFromClass(host.class), TXHostRank(host)]];
         return;
     }
 
