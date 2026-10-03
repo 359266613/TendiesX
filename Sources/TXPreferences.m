@@ -32,6 +32,7 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
 
 @interface TXPreferences ()
 @property (nonatomic, assign, readwrite) BOOL enabled;
+@property (nonatomic, assign, readwrite) BOOL autoApply;
 @property (nonatomic, copy,   readwrite) NSString *sourcePath;
 @property (nonatomic, copy,   readwrite) NSString *lastInstallMessage;
 @end
@@ -67,6 +68,7 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
 
 - (void)reload {
     self.enabled = TXCopyBoolPref(@"Enabled", YES);
+    self.autoApply = TXCopyBoolPref(@"AutoApply", YES);
 
     id path = TXCopyPref(@"SourcePath");
     self.sourcePath = [path isKindOfClass:NSString.class] && [path length] > 0 ? path : nil;
@@ -74,8 +76,8 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
     id message = TXCopyPref(@"LastInstallMessage");
     self.lastInstallMessage = [message isKindOfClass:NSString.class] ? message : nil;
 
-    TXLog(@"偏好读取 [%@]: Enabled=%d SourcePath=%@",
-          kTXPrefsDomain, self.enabled, self.sourcePath ?: @"(空)");
+    TXLog(@"偏好读取 [%@]: Enabled=%d AutoApply=%d SourcePath=%@",
+          kTXPrefsDomain, self.enabled, self.autoApply, self.sourcePath ?: @"(空)");
 }
 
 @end

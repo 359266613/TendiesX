@@ -201,6 +201,7 @@ static NSArray *gTXRootSpecifiers = nil;
 - (void)tx_pickFiles:(PSSpecifier *)specifier;
 - (void)tx_rescan:(PSSpecifier *)specifier;
 - (void)tx_installPoster:(PSSpecifier *)specifier;
+- (void)tx_pollInstallResult:(NSUInteger)attempt;
 - (void)tx_alertMessage:(NSString *)message;
 - (void)tx_refreshAfterImport;
 @end
@@ -222,6 +223,7 @@ static NSArray *gTXRootSpecifiers = nil;
         #pragma mark 开关
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"开关"]];
         [self tx_switchNamed:@"启用" key:@"Enabled" to:specs];
+        [self tx_switchNamed:@"安装后自动设为当前壁纸" key:@"AutoApply" to:specs];
 
         #pragma mark 素材（二级页）
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"素材"]];
@@ -239,7 +241,7 @@ static NSArray *gTXRootSpecifiers = nil;
         [self tx_buttonNamed:@"安装选中的素材" action:@selector(tx_installPoster:) to:specs];
         [self tx_buttonNamed:@"从「文件」App 选择 .tendies" action:@selector(tx_pickFiles:) to:specs];
         [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；动画由系统渲染"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"装完会自动设为当前壁纸；动画由系统渲染（关掉上面的开关则手动去「墙纸 → 添加新墙纸 → 收藏」选）"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"素材目录：/var/mobile/Library/TendiesX/（也可用 Filza 直接丢 .tendies）"
@@ -337,14 +339,25 @@ static NSArray *gTXRootSpecifiers = nil;
                                          CFSTR("com.axs.tendiesx/InstallPoster"),
                                          NULL, NULL, YES);
 
+    [self tx_pollInstallResult:0];
+}
+
+/// worker 侧是「解包 → 复制 → 重扫 → 建配置 → 设为当前壁纸」的异步链路，
+/// 所以轮询偏好里的结果：遇到"正在…"就再等一轮，最多 3 轮，避免弹出一个中间态。
+- (void)tx_pollInstallResult:(NSUInteger)attempt {
     __weak TXRootListController *weakSelf = self;
-    // worker 侧要解包 + 复制 + 等 PRS 重扫，给足时间再回读结果
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
+    NSTimeInterval delay = (attempt == 0) ? 6.0 : 7.0;
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         NSString *message = TXPrefGet(@"LastInstallMessage");
+        if ([message containsString:@"正在"] && attempt < 3) {
+            TXLog(@"面板: 安装仍在进行（第 %lu 次轮询）", (unsigned long)attempt + 1);
+            [weakSelf tx_pollInstallResult:attempt + 1];
+            return;
+        }
         [weakSelf tx_alertMessage:[NSString stringWithFormat:
-            @"%@\n\n下一步：设置 → 墙纸 → 添加新墙纸 → 收藏，选中它即可。\n"
-            @"详情见日志 /var/mobile/Library/Logs/TendiesX.log",
+            @"%@\n\n详情见日志 /var/mobile/Library/Logs/TendiesX.log",
             message.length ? message : @"已发出安装请求，但没收到结果（看日志确认）"]];
     });
 }

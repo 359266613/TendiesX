@@ -30,6 +30,11 @@
 /// 带 mercury → MercuryPoster，默认 CollectionsPoster。
 @property (nonatomic, copy, readonly) NSString *lastInstalledExtension;
 
+/// 上一次安装进去的 descriptor identifier 列表。
+/// 来源是 <descriptor>/com.apple.posterkit.provider.descriptor.identifier（纯文本，如 "7400"），
+/// 这是后面调 PRSService 创建配置时必需的参数。
+@property (nonatomic, copy, readonly) NSArray<NSString *> *lastInstalledDescriptorIdentifiers;
+
 /// 海报存储根目录；读不到返回 nil
 + (NSString *)storeRoot;
 

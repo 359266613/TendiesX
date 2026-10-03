@@ -24,7 +24,20 @@ static BOOL TXIsJunkEntry(NSString *name) {
 
 @interface TXPosterInstaller ()
 @property (nonatomic, copy, readwrite) NSString *lastInstalledExtension;
+@property (nonatomic, copy, readwrite) NSArray<NSString *> *lastInstalledDescriptorIdentifiers;
 @end
+
+/// descriptor 的 identifier 写在 <descriptor>/com.apple.posterkit.provider.descriptor.identifier，
+/// 是纯文本（实测内容就是 "7400"，4 字节、无换行），给 PRSService 建配置时要用。
+static NSString *TXDescriptorIdentifierIn(NSString *descriptorDirectory) {
+    NSString *file = [descriptorDirectory stringByAppendingPathComponent:
+                      @"com.apple.posterkit.provider.descriptor.identifier"];
+    NSString *text = [NSString stringWithContentsOfFile:file encoding:NSUTF8StringEncoding error:NULL];
+    if (!text.length) {
+        text = [NSString stringWithContentsOfFile:file encoding:NSISOLatin1StringEncoding error:NULL];
+    }
+    return [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
 
 @implementation TXPosterInstaller
 
@@ -235,6 +248,10 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
 
 - (NSArray<NSString *> *)installFromPath:(NSString *)path {
     NSMutableArray<NSString *> *installed = [NSMutableArray array];
+    NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+    _lastInstalledExtension = nil;
+    _lastInstalledDescriptorIdentifiers = @[];
+
     if (!path.length) {
         TXLog(@"[A] 安装失败: 源路径为空");
         return installed;
@@ -288,11 +305,17 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
         NSError *copyError = nil;
         if ([self tx_copyDescriptor:src to:dst error:&copyError]) {
             [installed addObject:dst];
-            TXLog(@"[A] 已安装 descriptor %@ -> %@", entry, newUUID);
+            NSString *identifier = TXDescriptorIdentifierIn(src);
+            if (identifier.length) {
+                [identifiers addObject:identifier];
+            }
+            TXLog(@"[A] 已安装 descriptor %@ (identifier=%@) -> %@",
+                  entry, identifier.length ? identifier : @"(未读到)", newUUID);
         } else {
             TXLog(@"[A] 安装失败 %@: %@", entry, copyError.localizedDescription);
         }
     }
+    _lastInstalledDescriptorIdentifiers = [identifiers copy];
 
     if (installed.count) {
         TXLog(@"[A] 共 %lu 个 descriptor 安装完成，交给 worker 调 PRSService 让 PosterBoard 重扫",

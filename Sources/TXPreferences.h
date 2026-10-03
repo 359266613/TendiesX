@@ -17,6 +17,8 @@
 
 /// 总开关：关掉后 worker 不响应安装请求
 @property (nonatomic, assign, readonly) BOOL enabled;
+/// 安装后自动把新壁纸设为当前壁纸（走 PRSService 建配置 + 选中），默认开
+@property (nonatomic, assign, readonly) BOOL autoApply;
 /// 选中的 .tendies（压缩包或已解包目录）
 @property (nonatomic, copy,   readonly) NSString *sourcePath;
 /// 上一次安装结果（worker 写、面板回读后弹窗）
