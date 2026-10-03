@@ -4,6 +4,16 @@
 #import "TXLogger.h"
 #import <AVFoundation/AVFoundation.h>
 
+/// 日志用的短路径（只留父目录名/文件名），避免整条绝对路径把日志撑爆
+static NSString *TXShortPath(NSString *path) {
+    if (!path.length) {
+        return @"(空)";
+    }
+    return [NSString stringWithFormat:@"%@/%@",
+            path.stringByDeletingLastPathComponent.lastPathComponent,
+            path.lastPathComponent];
+}
+
 #pragma mark - 渲染层
 
 /// 渲染层：video 型走 AVPlayerLooper 循环播放；ca / image 型先退化成静态兜底图，
@@ -53,7 +63,7 @@
     _playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
     [self.layer addSublayer:_playerLayer];
 
-    TXLog(@"渲染层: video 模式 video=%@", _package.videoURL.path);
+    TXLog(@"渲染层: video 模式 video=%@", _package.videoURL.lastPathComponent);
 }
 
 // ca / image 型：暂时显示静态兜底图（.ca 里的 Background 层资源或最大图）
@@ -67,7 +77,8 @@
     [self addSubview:_imageView];
 
     TXLog(@"渲染层: static 兜底模式 kind=%@ image=%@ (%@)，.ca 渲染待接入",
-          _package.kind, _package.fallbackImageURL.path, image ? @"已加载" : @"解码失败");
+          _package.kind, _package.fallbackImageURL.lastPathComponent,
+          image ? @"已加载" : @"解码失败");
 }
 
 - (void)layoutSubviews {
@@ -145,9 +156,13 @@
     NSString *path = prefs.activePackagePath;
 
     if (!path.length) {
-        path = [TXTendiesPackage firstAvailablePackagePath];
+        NSArray<NSString *> *candidates = [TXTendiesPackage availablePackagePaths];
+        for (NSUInteger i = 0; i < candidates.count; i++) {
+            TXLog(@"候选壁纸[%lu]: %@", (unsigned long)i, TXShortPath(candidates[i]));
+        }
+        path = candidates.firstObject;
         if (path.length) {
-            TXLog(@"未配置 ActivePackagePath，自动发现: %@", path);
+            TXLog(@"未配置 ActivePackagePath，自动发现: %@", TXShortPath(path));
         }
     }
 
@@ -155,15 +170,12 @@
 
     TXLog(@"重新加载: enabled=%d interaction=%d parallax=%d path=%@ -> %@",
           prefs.enabled, prefs.interactionEnabled, prefs.parallaxEnabled,
-          path.length ? path : @"(空)",
+          TXShortPath(path),
           self.activePackage
               ? [NSString stringWithFormat:@"%@(%@)", self.activePackage.displayName, self.activePackage.kind]
               : @"未解析出可用壁纸");
 
     NSArray<UIView *> *views = self.renderers.keyEnumerator.allObjects;
-    if (views.count) {
-        TXLog(@"重新挂载已存在的 %lu 个壁纸视图", (unsigned long)views.count);
-    }
     for (UIView *view in views) {
         [self attachToWallpaperView:view];
     }
@@ -175,6 +187,17 @@
     }
 
     TXWallpaperRenderer *existing = [self.renderers objectForKey:view];
+
+    // 调整：didMoveToWindow 会高频触发（切页/转屏都会走）。
+    // 同一视图已挂着同一个包时直接复用，不重建 —— 重建会重新解码图片、
+    // 让视频从头播放，表现为闪烁 + 反复解大图。
+    if (existing && existing.package && self.activePackage
+        && [existing.package.path isEqualToString:self.activePackage.path]) {
+        existing.frame = view.bounds;
+        [existing tx_start];
+        return;
+    }
+
     [existing removeFromSuperview];
     [self.renderers removeObjectForKey:view];
 
@@ -186,7 +209,7 @@
     if (!self.activePackage) {
         TXLog(@"跳过挂载(%@): 无可用 .tendies，ActivePackagePath=%@",
               NSStringFromClass(view.class),
-              prefs.activePackagePath.length ? prefs.activePackagePath : @"(空)");
+              prefs.activePackagePath.length ? TXShortPath(prefs.activePackagePath) : @"(空)");
         return;
     }
 

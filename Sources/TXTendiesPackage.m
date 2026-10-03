@@ -102,7 +102,12 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSString *> *found = [NSMutableArray array];
 
+    // 调整：按 searchDirectories 的优先级逐目录收集，只在「同一目录内部」排序。
+    // 之前是整体排序，导致 /var/mobile/Library/Caches/TendiesX/...（解包缓存）
+    // 因为字母序排在 /var/mobile/Library/TendiesX/... 之前，永远抢到自动发现，
+    // 用户新放进素材目录的 .tendies 反而扫不到。
     for (NSString *dir in [self searchDirectories]) {
+        NSMutableArray<NSString *> *inDirectory = [NSMutableArray array];
         for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
             NSString *full = [dir stringByAppendingPathComponent:item];
             BOOL isDir = NO;
@@ -112,12 +117,13 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
             BOOL isTendiesZip = [[item.pathExtension lowercaseString] isEqualToString:@"tendies"];
             BOOL isUnpackedTendies = isDir && [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"descriptors"]];
             if (isTendiesZip || isUnpackedTendies) {
-                [found addObject:full];
+                [inDirectory addObject:full];
             }
         }
+        [inDirectory sortUsingSelector:@selector(compare:)];
+        [found addObjectsFromArray:inDirectory];
     }
 
-    [found sortUsingSelector:@selector(compare:)];
     return found;
 }
 
@@ -339,8 +345,8 @@ static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
 
     TXLog(@"解析成功: name=%@ kind=%@ video=%@ fallbackImage=%@ .ca=%lu zip=%@",
           _displayName, _kind,
-          _videoURL.path ?: @"(无)",
-          _fallbackImageURL.path ?: @"(无)",
+          _videoURL.lastPathComponent ?: @"(无)",
+          _fallbackImageURL.lastPathComponent ?: @"(无)",
           (unsigned long)_caBundlePaths.count,
           _unpackedFromZip ? @"是" : @"否");
     return YES;

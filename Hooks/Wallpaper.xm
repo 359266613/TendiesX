@@ -8,6 +8,7 @@
 #import "TXWallpaperManager.h"
 #import "TXPreferences.h"
 #import "TXLogger.h"
+#import "TXPosterStoreProbe.h"
 #import <objc/runtime.h>
 
 #pragma mark - 1. 壁纸视图：挂载 / 布局 / 前后台生命周期
@@ -17,7 +18,6 @@
 - (void)didMoveToWindow {
     %orig;
     if (self.window) {
-        TXLog(@"hook: %@ -didMoveToWindow", NSStringFromClass(self.class));
         [TXWallpaperManager.sharedManager attachToWallpaperView:self];
     }
 }
@@ -103,4 +103,7 @@
 
     // sharedManager 首次访问时内部就会 reloadFromDisk，把偏好与解析结果打进日志
     (void)TXWallpaperManager.sharedManager;
+
+    // 探测系统海报存储落点（确定 ca 型 .tendies 的安装位置后即可去掉）
+    TXProbePosterStore();
 }

@@ -303,7 +303,7 @@ static NSArray *gTXRootSpecifiers = nil;
 - (void)openTelegramChannel:(id)_    { [self openTelegramChannel]; }
 
 - (void)openQQGroup {
-    [self openURL:[NSURL URLWithString:@"http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=b9yIV3X8xKi3ZZUC7YXIr1YasKOzjYnm&authKey=ReN7wx79FV6Y4EIowsWSljNRUTSaGfgwWlmRzuvpWpBxl%2BCEKz%2BMNP3JePx1mMQ8&noverify=0&group_code=1001525693"]
+    [self openURL:[NSURL URLWithString:@"mqqapi://card/show_pslcard?src_type=internal&version=1&card_type=group&uin=678055716"]
          fallback:nil];
 }
 - (void)openQQGroup:(id)_            { [self openQQGroup]; }
