@@ -67,7 +67,7 @@
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>label</key>
-			<string>安装选中的素材</string>
+			<string>安装选择的素材</string>
 			<key>action</key>
 			<string>tx_installPoster:</string>
 			<key>id</key>
