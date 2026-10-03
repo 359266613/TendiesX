@@ -1,0 +1,19 @@
+# Theos
+.theos/
+packages/
+build/
+.layout/
+*.deb
+*.dylib
+*.o
+*.a
+
+# Xcode / macOS
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,9 @@
+Package: com.axs.tendiesx
+Name: TendiesX
+Version: 0.0.1
+Architecture: iphoneos-arm64
+Description: .tendies 交互壁纸引擎（iOS 15.0 - 17.3.1）
+Maintainer: axs
+Author: axs
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 15.0)
