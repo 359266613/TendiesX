@@ -1,8 +1,8 @@
 //
 //  TendiesXRootListController.m
 //  设置面板（按 ios-tweak-scaffold 模板）：
-//    · Resources/Root.plist → 规格行（开关等），改文案不用重编
-//    · 本文件               → 动态行：素材操作按钮组 + 固定「关于我们」按钮组
+//    · Resources/Root.plist → 全部规格（开关 / 素材 / 素材操作按钮），改文案不用重编
+//    · 本文件               → 固定「关于我们」按钮组 + 二级页「选择素材」+ 按钮动作
 //
 //  面板只做三件事：写偏好、发 Darwin 通知、把结果弹出来。
 //  真正的文件操作（解包 / 装 descriptor / 设为当前壁纸）在 SpringBoard 侧 worker 里做，
@@ -126,6 +126,7 @@ static NSString *TXDisplayName(NSString *path) {
 
 @interface TendiesXRootListController () <UIDocumentPickerDelegate>
 - (void)btn:(NSString *)title act:(SEL)action to:(NSMutableArray *)array;
+- (void)fixButtonActions:(NSMutableArray *)specs;
 - (void)tx_installPoster:(id)sender;
 - (void)tx_cleanupDuplicates:(id)sender;
 - (void)tx_pickFiles:(id)sender;
@@ -143,25 +144,22 @@ static NSString *TXDisplayName(NSString *path) {
 @end
 
 @implementation TendiesXRootListController {
-    NSArray *_rows;   // 规格缓存（plist 行 + 代码追加的按钮组）
+    NSArray *_rows;   // 规格缓存（plist 行 + 代码追加的「关于我们」）
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    // Root.plist 里「选择素材」的 detail 只是类名字符串，不产生类引用，链接器可能把二级页剔掉；
+    // 这里显式引用一次保活，并确认它真的在。
+    (void)[TXPackageListController class];
+    TXLog(@"面板: 二级页类=%@", NSClassFromString(@"TXPackageListController") ? @"可用" : @"缺失");
 }
 
 - (NSArray *)specifiers {
     if (!_rows) {
+        // 全部规格（开关 / 素材 / 素材操作）都在 Resources/Root.plist 里
         NSMutableArray *specs = [[self loadSpecifiersFromPlistName:@"Root" target:self] mutableCopy];
-
-        // 素材操作（按钮一律在代码里生成：模板约定，plist 只放规格行）
-        PSSpecifier *ops = [PSSpecifier groupSpecifierWithName:@"素材操作"];
-        [ops setProperty:@"装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；开了自动生效则直接替换当前壁纸。"
-                  forKey:@"footerText"];
-        [specs addObject:ops];
-        [self btn:@"安装选中的素材" act:@selector(tx_installPoster:) to:specs];
-        [self btn:@"清理重复壁纸" act:@selector(tx_cleanupDuplicates:) to:specs];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"选择素材" target:self set:nil get:nil
-                                                        detail:[TXPackageListController class]
-                                                          cell:PSLinkCell edit:nil]];
-        [self btn:@"从「文件」App 选择 .tendies" act:@selector(tx_pickFiles:) to:specs];
-        [self btn:@"重新扫描素材目录" act:@selector(tx_rescan:) to:specs];
+        [self fixButtonActions:specs];   // plist 的 action 没被带进来时兜一手
 
         // 关于我们（固定：每个插件都相同，照抄即可）
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"关于我们"]];
@@ -170,10 +168,30 @@ static NSString *TXDisplayName(NSString *path) {
         [self btn:@"QQ交流群组" act:@selector(openQQGroup:) to:specs];
 
         _rows = [specs copy];
-        TXLog(@"面板: 规格构建完成（%lu 行）", (unsigned long)_rows.count);
+        TXLog(@"面板: 规格构建完成（%lu 行，plist + 关于我们）", (unsigned long)_rows.count);
     }
     TXSetSpecifiers(self, _rows);
     return _rows;
+}
+
+/// plist 里按钮写的是 action（Preferences 的约定）；个别版本没把 action 带进 specifier，
+/// 就按 id 兜一下，保证按钮一定点得动。
+- (void)fixButtonActions:(NSMutableArray *)specs {
+    NSDictionary<NSString *, NSString *> *fallback = @{
+        @"install": @"tx_installPoster:",
+        @"cleanup": @"tx_cleanupDuplicates:",
+        @"pick": @"tx_pickFiles:",
+        @"rescan": @"tx_rescan:",
+    };
+    for (PSSpecifier *spec in specs) {
+        if (spec.buttonAction || !spec.identifier.length) {
+            continue;
+        }
+        NSString *selectorName = fallback[spec.identifier];
+        if (selectorName.length) {
+            spec.buttonAction = NSSelectorFromString(selectorName);
+        }
+    }
 }
 
 // 通用：往规格列表末尾加一个按钮型 specifier

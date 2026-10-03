@@ -33,4 +33,9 @@
               extension:(NSString *)extensionIdentifier
              completion:(void (^)(BOOL applied, NSString *detail))completion;
 
+/// 重建图库缓存：重扫 descriptor → 清掉旧快照（收藏里那些残留的黑缩略图就是这个）
+/// → 再回读一次列表。
+- (void)rebuildGalleryForExtension:(NSString *)extensionIdentifier
+                        completion:(void (^)(NSUInteger count, NSArray *identifiers))completion;
+
 @end

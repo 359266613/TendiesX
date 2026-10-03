@@ -21,6 +21,7 @@
 - (void)refreshSnapshotForGalleryItemsMatchingDescriptorIdentifier:(id)descriptorIdentifier
                                                 extensionIdentifier:(id)extensionIdentifier
                                                          completion:(void (^)(id result))completion;
+- (oneway void)deleteSnapshots:(BOOL)snapshots completion:(void (^)(id result))completion;
 @end
 
 /// PRSService 的经典取法：有 sharedInstance 就用，没有就 alloc/init
@@ -138,6 +139,41 @@ static BOOL TXIsPosterConfiguration(id object) {
             completion(list.count, [identifiers copy]);
         }
     }];
+}
+
+#pragma mark - 重建图库缓存（黑缩略图）
+
+- (void)rebuildGalleryForExtension:(NSString *)extensionIdentifier
+                        completion:(void (^)(NSUInteger, NSArray *))completion {
+    if (!extensionIdentifier.length) {
+        if (completion) {
+            completion(0, nil);
+        }
+        return;
+    }
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        id service = TXPRSServiceInstance();
+        if (!service) {
+            if (completion) {
+                completion(0, nil);
+            }
+            return;
+        }
+
+        // 先清快照缓存：收藏里的黑缩略图就是缓存里的旧图，不清掉重建也还是黑的
+        if ([service respondsToSelector:NSSelectorFromString(@"deleteSnapshots:completion:")]) {
+            TXLog(@"[PRS] 清掉旧快照缓存（黑缩略图的根源）");
+            [(id<TXPRSService>)service deleteSnapshots:YES completion:^(id result) {
+                TXLog(@"[PRS] 清快照回调: %@", result);
+            }];
+        } else {
+            TXLog(@"[PRS] 本系统不支持 deleteSnapshots:，跳过清缓存");
+        }
+
+        // 再让 PosterBoard 按磁盘上的真实内容重建列表和缩略图
+        [self refreshExtension:extensionIdentifier completion:completion];
+    });
 }
 
 #pragma mark - 装完自动生效

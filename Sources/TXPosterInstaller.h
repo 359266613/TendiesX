@@ -48,4 +48,9 @@
 /// @return 实际删除的数量
 - (NSUInteger)cleanupDuplicateInstallsInExtension:(NSString *)extensionIdentifier;
 
+/// kill 掉 PosterBoard 让它重新读盘：删过 / 装过 descriptor 之后，
+/// PRS 重扫不会清掉图库里的旧行和旧缩略图（收藏里那些黑图就是这么留下的）。
+/// launchd 会立刻把它拉起来，不影响系统。
++ (void)restartPosterBoard;
+
 @end

@@ -16,7 +16,7 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>default</key>
-			<false/>
+			<true/>
 			<key>defaults</key>
 			<string>com.axs.tendiesx</string>
 			<key>key</key>
@@ -51,6 +51,64 @@
 			<string>currentMaterial</string>
 			<key>label</key>
 			<string>当前素材：无</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>素材操作</string>
+			<key>footerText</key>
+			<string>装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；开了自动生效会直接替换当前壁纸并重启 PosterBoard 刷新收藏。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>安装选中的素材</string>
+			<key>action</key>
+			<string>tx_installPoster:</string>
+			<key>id</key>
+			<string>install</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>清理重复壁纸</string>
+			<key>action</key>
+			<string>tx_cleanupDuplicates:</string>
+			<key>id</key>
+			<string>cleanup</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkCell</string>
+			<key>detail</key>
+			<string>TXPackageListController</string>
+			<key>id</key>
+			<string>material</string>
+			<key>label</key>
+			<string>选择素材</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>从「文件」App 选择 .tendies</string>
+			<key>action</key>
+			<string>tx_pickFiles:</string>
+			<key>id</key>
+			<string>pick</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>重新扫描素材目录</string>
+			<key>action</key>
+			<string>tx_rescan:</string>
+			<key>id</key>
+			<string>rescan</string>
 		</dict>
 	</array>
 	<key>title</key>
