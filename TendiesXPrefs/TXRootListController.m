@@ -198,6 +198,111 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
 @end
 
+#pragma mark - Root.plist 加载（原生优先，自己解析兜底）
+
+/// Root.plist 的真实路径：先问 bundle，再按安装路径兜底（rootless 在 /var/jb 下）
+static NSString *TXRootPlistPath(void) {
+    Class cls = NSClassFromString(@"TXRootListController");
+    NSBundle *bundle = cls ? [NSBundle bundleForClass:cls] : NSBundle.mainBundle;
+    NSString *path = [bundle pathForResource:@"Root" ofType:@"plist"];
+    if (path.length) {
+        return path;
+    }
+    NSString *relative = @"Library/PreferenceBundles/TendiesXPrefs.bundle/Root.plist";
+    for (NSString *root in @[ @"/var/jb", @"/" ]) {
+        NSString *candidate = [root stringByAppendingPathComponent:relative];
+        if ([NSFileManager.defaultManager fileExistsAtPath:candidate]) {
+            return candidate;
+        }
+    }
+    return nil;
+}
+
+/// 原生加载器 loadSpecifiersFromPlistName:target: —— dump 没收录，所以先探再用。
+/// 用 IMP 调用（避免 performSelector 的 ARC 警告），返回值按 +0 处理。
+static NSArray *TXLoadSpecifiersNatively(id controller) {
+    SEL loader = NSSelectorFromString(@"loadSpecifiersFromPlistName:target:");
+    if (![controller respondsToSelector:loader]) {
+        return nil;
+    }
+    IMP imp = [controller methodForSelector:loader];
+    if (!imp) {
+        return nil;
+    }
+    typedef NSArray *(*TXSpecLoaderFn)(id, SEL, NSString *, id);
+    return ((TXSpecLoaderFn)imp)(controller, loader, @"Root", controller);
+}
+
+/// 自解析 Root.plist：与 PSListController 行为对齐的最小实现，只覆盖本插件用到的 cell。
+/// 有它兜底，面板内容永远和 Root.plist 一致（不依赖任何私有加载器）。
+static NSArray *TXSpecifiersFromPlist(NSDictionary *plist, id target) {
+    NSArray *items = plist[@"items"];
+    if (![items isKindOfClass:NSArray.class]) {
+        return @[];
+    }
+
+    NSMutableArray *specs = [NSMutableArray array];
+    for (NSDictionary *item in items) {
+        if (![item isKindOfClass:NSDictionary.class]) {
+            continue;
+        }
+        NSString *cellName = [item[@"cell"] isKindOfClass:NSString.class] ? item[@"cell"] : @"PSGroupSpecifier";
+        NSString *label = [item[@"label"] isKindOfClass:NSString.class] ? item[@"label"] : @"";
+
+        PSSpecifier *spec = nil;
+        if ([cellName isEqualToString:@"PSGroupSpecifier"]) {
+            spec = [PSSpecifier groupSpecifierWithName:label];
+        } else {
+            Class detailClass = nil;
+            if ([item[@"detail"] isKindOfClass:NSString.class]) {
+                detailClass = NSClassFromString(item[@"detail"]);
+            }
+            // 开关的读写选择器直接指到本类（plist 里没写 get/set 时原生也会这么做）
+            SEL getter = NULL;
+            SEL setter = NULL;
+            if ([cellName isEqualToString:@"PSSwitchCell"]) {
+                getter = NSSelectorFromString(@"tx_getSwitchValue:");
+                setter = NSSelectorFromString(@"tx_setSwitchValue:specifier:");
+            }
+            spec = [PSSpecifier preferenceSpecifierNamed:label
+                                                  target:target
+                                                     set:setter
+                                                     get:getter
+                                                  detail:detailClass
+                                                    cell:TXCellType(cellName, TXCellStaticText)
+                                                    edit:NULL];
+        }
+        if (!spec) {
+            continue;
+        }
+
+        // 其余键原样搬过去：key / default / footerText / id / action ...
+        for (NSString *key in item) {
+            if ([key isEqualToString:@"cell"] || [key isEqualToString:@"label"]) {
+                continue;
+            }
+            id value = item[key];
+            if (value) {
+                [spec setProperty:value forKey:key];
+            }
+        }
+        [specs addObject:spec];
+    }
+    return specs;
+}
+
+/// 面板自检：这几行是排查「面板空/只有一部分」的唯一依据
+static void TXLogPanelProbe(void) {
+    Class cls = NSClassFromString(@"TXRootListController");
+    NSBundle *bundle = cls ? [NSBundle bundleForClass:cls] : NSBundle.mainBundle;
+    Class listClass = NSClassFromString(@"PSListController");
+    BOOL hasLoader = [listClass instancesRespondToSelector:
+                      NSSelectorFromString(@"loadSpecifiersFromPlistName:target:")];
+    TXLog(@"面板: bundle=%@", bundle.bundlePath ?: @"(未知)");
+    TXLog(@"面板: Root.plist=%@", TXRootPlistPath() ?: @"(没找到！)");
+    TXLog(@"面板: 原生加载器=%@", hasLoader ? @"有" : @"缺失");
+}
+
 #pragma mark - 根页面（布局全部来自 Resources/Root.plist）
 
 @interface TXRootListController : PSListController <UIDocumentPickerDelegate>
@@ -208,6 +313,8 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 - (BOOL)tx_hasAboutSection:(NSArray *)specifiers;
 - (void)tx_wireButtons;
 - (void)tx_refreshDynamicLabels;
+- (id)tx_getSwitchValue:(PSSpecifier *)specifier;
+- (void)tx_setSwitchValue:(id)value specifier:(PSSpecifier *)specifier;
 - (void)tx_installPoster:(PSSpecifier *)specifier;
 - (void)tx_cleanupDuplicates:(PSSpecifier *)specifier;
 - (void)tx_pollInstallResult:(NSUInteger)attempt;
@@ -250,7 +357,8 @@ static NSDictionary<NSString *, NSString *> *TXButtonSelectors(void) {
     // 这里显式引用一次保活，并确认它真的在。
     Class detailClass = [TXPackageListController class];
     (void)detailClass;
-    TXLog(@"面板: viewDidLoad（布局来自 Root.plist），二级页类=%@",
+    TXLogPanelProbe();
+    TXLog(@"面板: viewDidLoad，二级页类=%@",
           NSClassFromString(@"TXPackageListController") ? @"可用" : @"缺失");
 }
 
@@ -268,16 +376,32 @@ static NSDictionary<NSString *, NSString *> *TXButtonSelectors(void) {
 /// （链接/文案要写在代码里，方便直接改）。
 /// 做法是**先拿父类结果再追加**，绝不从零构建 —— plist 依旧是布局的唯一来源。
 - (NSArray *)specifiers {
-    NSArray *base = [super specifiers];   // 父类读 Root.plist，并缓存进 _specifiers
+    // 三级兜底，任何一级拿到内容就不再往下走（实测 [super specifiers] 在 iOS 16.5 上
+    // 并不会自动读 bundle 里的 Root.plist，所以原生加载器和自解析都留着）
+    NSArray *base = [super specifiers];
+    NSString *source = @"父类";
+
     if (!base.count) {
-        // plist 读不到时不要整页空白：至少把代码里的「关于我们」显示出来，日志里也留痕
-        TXLog(@"面板: 警告 Root.plist 没读到（父类返回空），本次只显示「关于我们」");
-    } else if ([self tx_hasAboutSection:base]) {
-        return base;                      // 已经追加过了（父类缓存返回的就是追加后的那份）
+        NSArray *native = TXLoadSpecifiersNatively(self);
+        if (native.count) {
+            base = native;
+            source = @"loadSpecifiersFromPlistName:";
+        }
     }
+    if (!base.count) {
+        NSString *path = TXRootPlistPath();
+        NSDictionary *plist = path.length ? [NSDictionary dictionaryWithContentsOfFile:path] : nil;
+        base = TXSpecifiersFromPlist(plist, self);
+        source = path.length ? @"自解析 Root.plist" : @"没有 Root.plist";
+    }
+
+    if ([self tx_hasAboutSection:base]) {
+        return base;   // 已经追加过了（缓存里返回的就是追加后的那份）
+    }
+
+    TXLog(@"面板: 布局来源=%@，%lu 行", source, (unsigned long)base.count);
     NSArray *combined = [(base ?: @[]) arrayByAddingObjectsFromArray:[self tx_aboutSpecifiers]];
     TXAssignSpecifiers(self, combined);   // 表数据源读的是 _specifiers，必须写回
-    TXLog(@"面板: plist %lu 行 + 代码追加「关于我们」3 行", (unsigned long)base.count);
     return combined;
 }
 

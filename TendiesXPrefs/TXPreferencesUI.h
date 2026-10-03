@@ -63,6 +63,10 @@ enum {
 @property (nonatomic, retain) PSSpecifier *specifier;
 - (void)reloadSpecifiers;
 - (void)reloadSpecifier:(PSSpecifier *)specifier;
+
+/// plist → specifiers 的原生加载器（我们的 dump 里没收录这条，签名按惯例写）。
+/// **调用前必须先 respondsToSelector: 探一下**，不存在就走自解析兜底。
+- (NSArray *)loadSpecifiersFromPlistName:(NSString *)name target:(id)target;
 @end
 
 #endif /* TXPreferencesUI_h */
