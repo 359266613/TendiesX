@@ -39,8 +39,19 @@ static UIImage *TXLoadCachedImage(NSString *path) {
 
 #pragma mark - 渲染层
 
-/// 调整：一次性打印壁纸视图的子视图层级，用于判断我们的渲染层是否被系统层盖住
-/// （下拉通知中心 / 上滑多任务时壁纸闪一下就没，需要先看清谁在上层）
+/// 把一个视图的直接子视图列成一行（带尺寸和 hidden，方便看出"谁盖住谁"）
+static NSString *TXChildDescription(UIView *view) {
+    NSMutableString *desc = [NSMutableString string];
+    for (UIView *sub in view.subviews) {
+        [desc appendFormat:@"%@(%.0fx%.0f,hidden=%d) ", NSStringFromClass(sub.class),
+                            sub.bounds.size.width, sub.bounds.size.height, sub.hidden];
+    }
+    return desc;
+}
+
+/// 调整：一次性打印壁纸视图及其**父级**的子视图层级。
+/// 模糊 / 暗淡 / 快照层一般是壁纸视图的兄弟节点（同容器、在它上面），
+/// 只看壁纸视图自己的子视图是查不出"被谁盖住"的。
 static void TXDumpHierarchyOnce(UIView *view) {
     static NSMutableSet<NSString *> *dumped;
     static dispatch_once_t once;
@@ -54,14 +65,14 @@ static void TXDumpHierarchyOnce(UIView *view) {
     }
     [dumped addObject:key];
 
-    NSMutableString *desc = [NSMutableString string];
-    for (UIView *sub in view.subviews) {
-        [desc appendFormat:@"%@(%.0fx%.0f) ", NSStringFromClass(sub.class),
-                            sub.bounds.size.width, sub.bounds.size.height];
-    }
     UIView *content = [(PBUIWallpaperView *)view contentView];
-    TXLog(@"层级 %@: contentView=%@ | 子视图=[%@]",
-          key, content ? NSStringFromClass(content.class) : @"(无)", desc);
+    UIView *parent = view.superview;
+    TXLog(@"层级 %@: contentView=%@", key,
+          content ? NSStringFromClass(content.class) : @"(无)");
+    TXLog(@"  自身子视图 = [%@]", TXChildDescription(view));
+    TXLog(@"  父级 %@ 子视图 = [%@]",
+          parent ? NSStringFromClass(parent.class) : @"(无)",
+          parent ? TXChildDescription(parent) : @"");
 }
 
 /// 渲染层：video 型走 AVPlayerLooper 循环播放；ca / image 型先退化成静态兜底图，
