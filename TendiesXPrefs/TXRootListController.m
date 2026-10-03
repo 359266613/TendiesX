@@ -16,6 +16,7 @@
 #import "TXPreferencesUI.h"
 #import "TXLogger.h"
 #import <objc/runtime.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
@@ -206,13 +207,15 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
 static NSArray *gTXRootSpecifiers = nil;
 
-@interface TXRootListController : PSListController
+@interface TXRootListController : PSListController <UIDocumentPickerDelegate>
 @end
 
 @interface TXRootListController ()
 - (PSSpecifier *)tx_switchNamed:(NSString *)name key:(NSString *)key to:(NSMutableArray *)specs;
 - (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs;
+- (void)tx_pickFiles:(PSSpecifier *)specifier;
 - (void)tx_rescan:(PSSpecifier *)specifier;
+- (void)tx_refreshAfterImport;
 @end
 
 @implementation TXRootListController
@@ -245,16 +248,20 @@ static NSArray *gTXRootSpecifiers = nil;
                                                            detail:[TXPackageListController class]
                                                              cell:TXCellLink edit:nil];
         [specs addObject:picker];
-        [self tx_buttonNamed:@"导入 / 重新扫描素材" action:@selector(tx_rescan:) to:specs];
+
+        #pragma mark 导入素材
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"导入素材"]];
+        [self tx_buttonNamed:@"从「文件」App 选择 .tendies" action:@selector(tx_pickFiles:) to:specs];
+        [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"导入时自动解压到 Library/，不留 .tendies 原文件"
+                                                       target:nil set:nil get:nil detail:nil
+                                                         cell:TXCellStaticText edit:nil]];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"也可以直接用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/"
+                                                       target:nil set:nil get:nil detail:nil
+                                                         cell:TXCellStaticText edit:nil]];
 
         #pragma mark 说明
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"说明"]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/，再点上面的按钮"
-                                                       target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellStaticText edit:nil]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"导入时会自动解压到 Library/ 并删除 .tendies 源文件"
-                                                       target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellStaticText edit:nil]];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"运行日志：/var/mobile/Library/Logs/TendiesX.log"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
@@ -304,17 +311,65 @@ static NSArray *gTXRootSpecifiers = nil;
     [self reloadSpecifiers];
 }
 
-// 调整：这个按钮现在兼职「导入」—— 先发通知让 SpringBoard 侧的 Tweak 立刻
-// 扫描投放目录、解压新素材并删除 .tendies 源文件，再延迟刷新列表把新素材显示出来。
+// 重新扫描：通知 Tweak 重新读盘，稍后刷新列表
 - (void)tx_rescan:(PSSpecifier *)specifier {
     TXNotifyReload();
-    TXLog(@"面板: 已请求导入 / 重新扫描素材");
+    TXLog(@"面板: 已请求重新扫描素材");
+    [self tx_refreshAfterImport];
+}
 
-    gTXRootSpecifiers = nil;
-    gTXPackageSpecifiers = nil;
-    gTXPackagePaths = nil;
-    [self reloadSpecifiers];
+// 按钮 cell 的 action 通常带 specifier 参数，这里兜无参版本（不同系统版本行为不一致）
+- (void)tx_rescan    { [self tx_rescan:nil]; }
+- (void)tx_pickFiles { [self tx_pickFiles:nil]; }
 
+#pragma mark - 从「文件」App 导入
+
+// asCopy:YES 会把用户选中的文件先复制到 App 自己的临时目录再给我们 URL，
+// 省掉 security-scoped 那一套，拿到就能直接搬走。
+- (void)tx_pickFiles:(PSSpecifier *)specifier {
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData]
+                                                                   asCopy:YES];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = YES;
+    [self presentViewController:picker animated:YES completion:nil];
+    TXLog(@"面板: 打开「文件」选择器");
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller
+ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSUInteger copied = 0;
+
+    for (NSURL *url in urls) {
+        NSString *name = url.lastPathComponent;
+        if (![[name.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+            name = [name stringByAppendingPathExtension:@"tendies"];
+        }
+        NSString *destination = [kTXBaseDir stringByAppendingPathComponent:name];
+        [fm removeItemAtPath:destination error:NULL];   // 同名直接覆盖，便于重新导入
+
+        NSError *error = nil;
+        if ([fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:destination] error:&error]) {
+            copied++;
+        } else {
+            TXLog(@"面板: 复制失败 %@（%@）", name, error.localizedDescription);
+        }
+    }
+
+    TXLog(@"面板: 已放入投放目录 %lu 个，请求 Tweak 导入解压", (unsigned long)copied);
+    if (copied) {
+        TXNotifyReload();
+    }
+    [self tx_refreshAfterImport];
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    TXLog(@"面板: 取消选择文件");
+}
+
+// 导入 + 解压是在 SpringBoard 侧异步做的，等一会儿再刷新列表
+- (void)tx_refreshAfterImport {
     __weak TXRootListController *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
@@ -322,12 +377,9 @@ static NSArray *gTXRootSpecifiers = nil;
         gTXPackageSpecifiers = nil;
         gTXPackagePaths = nil;
         [weakSelf reloadSpecifiers];
-        TXLog(@"面板: 导入 / 重新扫描完成");
+        TXLog(@"面板: 列表已刷新");
     });
 }
-
-// 按钮 cell 的 action 会带 specifier 参数，这里兜一个无参版本
-- (void)tx_rescan { [self tx_rescan:nil]; }
 
 #pragma mark - 开关读写（get/set 选择器 + 控制器级读写，两条路都覆盖）
 

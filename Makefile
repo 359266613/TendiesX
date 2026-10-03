@@ -28,7 +28,7 @@ TendiesXPrefs_CFLAGS = -fobjc-arc \
 	-I./TendiesXPrefs \
 	-I./Sources \
 	-Wno-error
-TendiesXPrefs_FRAMEWORKS = Foundation UIKit
+TendiesXPrefs_FRAMEWORKS = Foundation UIKit UniformTypeIdentifiers
 TendiesXPrefs_LDFLAGS = -undefined dynamic_lookup
 TendiesXPrefs_INSTALL_PATH = /Library/PreferenceBundles
 TendiesXPrefs_RESOURCE_DIRS = TendiesXPrefs/Resources

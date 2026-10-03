@@ -93,8 +93,12 @@ static NSString *TXLibraryDirectory(void) {
                                  TXSafeComponentName(item.stringByDeletingPathExtension)];
         NSString *marker = [destination stringByAppendingPathComponent:@".unpacked"];
 
-        // 已解压过就直接删源文件；没解压过才解
-        if (![fm fileExistsAtPath:marker]) {
+        // 没解压过、或源文件比上次解压更新（重新导入同一份素材）→ 重新解压
+        NSDate *sourceDate = [fm attributesOfItemAtPath:source error:NULL].fileModificationDate;
+        NSDate *markerDate = [fm attributesOfItemAtPath:marker error:NULL].fileModificationDate;
+        BOOL needsExtract = !markerDate
+            || (sourceDate && [sourceDate compare:markerDate] == NSOrderedDescending);
+        if (needsExtract) {
             TXLog(@"导入素材: %@", item);
             TXZipArchive *archive = [TXZipArchive archiveWithContentsOfFile:source];
             NSError *error = nil;
