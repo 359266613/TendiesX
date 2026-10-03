@@ -2,7 +2,6 @@
 #import "TXZipArchive.h"
 #import "TXLogger.h"
 #import <UIKit/UIKit.h>
-#import <stdlib.h>
 
 static NSString *const kTXDefaultPosterExtension = @"com.apple.WallpaperKit.CollectionsPoster";
 
@@ -296,10 +295,12 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
     }
 
     if (installed.count) {
-        TXLog(@"[A] 共 %lu 个 descriptor 安装完成，重启 PosterBoard 让它重扫",
+        TXLog(@"[A] 共 %lu 个 descriptor 安装完成，交给 worker 调 PRSService 让 PosterBoard 重扫",
               (unsigned long)installed.count);
-        int ret = system("killall -9 PosterBoard 2>/dev/null");
-        TXLog(@"[A] killall PosterBoard 返回 %d（非 0 也没关系，respring 同样生效）", ret);
+        // 这里不再 killall PosterBoard：
+        // 1) iOS 上没有 system()（SDK 标记 __API_UNAVAILABLE(ios)）；
+        // 2) 官方重扫方式是 PRSService -refreshPosterDescriptorsForExtension:，
+        //    由 Hooks/Worker.xm 在安装成功后调用，不用重启进程。
     } else {
         TXLog(@"[A] 没有安装任何 descriptor（源目录里没有 UUID 子目录？）");
     }

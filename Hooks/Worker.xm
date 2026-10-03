@@ -72,10 +72,12 @@ static void TXHandleInstallPoster(CFNotificationCenterRef center,
         [TXPosterService.sharedService refreshExtension:extension
                                              completion:^(NSUInteger count, NSArray *identifiers) {
             NSString *message = count
-                ? [NSString stringWithFormat:@"已安装 %lu 个；该扩展现有 %lu 个壁纸（%@）",
+                ? [NSString stringWithFormat:@"已安装 %lu 个；该扩展现有 %lu 个壁纸（%@）\n"
+                   @"去「设置 → 墙纸 → 添加新墙纸 → 收藏」即可看到",
                    (unsigned long)installed.count, (unsigned long)count,
                    identifiers.count ? [identifiers componentsJoinedByString:@", "] : @"无标识"]
-                : [NSString stringWithFormat:@"已安装 %lu 个；但读不到该扩展的壁纸列表（看日志 [PRS] 行）",
+                : [NSString stringWithFormat:@"已安装 %lu 个；但读不到该扩展的壁纸列表\n"
+                   @"（看日志 [PRS] 行；必要时 respring 一次）",
                    (unsigned long)installed.count];
             [prefs updateLastInstallMessage:message];
             TXLog(@"[worker] 安装结束: %@", message);

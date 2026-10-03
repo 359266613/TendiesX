@@ -54,7 +54,7 @@ static id TXPRSServiceInstance(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         id service = TXPRSServiceInstance();
         if (!service) {
-            TXLog(@"[PRS] 本系统没有 PRSService，跳过重扫（仍会用 killall PosterBoard 兜底）");
+            TXLog(@"[PRS] 本系统没有 PRSService，跳过重扫 —— 需要手动 respring 才会看到新壁纸");
             if (completion) {
                 completion(0, nil);
             }
