@@ -1,3 +1,6 @@
+DEBUG = 0
+FINALPACKAGE = 1
+
 export TARGET = iphone:clang:latest:15.0
 export ARCHS = arm64 arm64e
 THEOS_PACKAGE_SCHEME ?= rootless
@@ -9,21 +12,21 @@ include $(THEOS)/makefiles/common.mk
 TWEAK_NAME = TendiesX
 TendiesX_FILES = $(wildcard Hooks/*.xm) $(wildcard Sources/*.m)
 TendiesX_CFLAGS = -fobjc-arc \
-	-I$(THEOS_PROJECT_DIR)/Headers \
-	-I$(THEOS_PROJECT_DIR)/Sources \
+	-I./Headers \
+	-I./Sources \
+	-Wno-error \
 	-Wno-deprecated-declarations \
 	-Wno-objc-missing-super-calls \
-	-Wno-unused-variable \
-	-Wno-error
+	-Wno-unused-variable
 TendiesX_FRAMEWORKS = Foundation UIKit QuartzCore CoreVideo CoreMotion CoreImage ImageIO Metal MetalKit AVFoundation
 TendiesX_LIBRARIES = z
 
-# ---------- 设置面板 ----------
+# ---------- 设置面板（单 deb 双产物：tweak.mk + bundle.mk） ----------
 BUNDLE_NAME = TendiesXPrefs
 TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m
 TendiesXPrefs_CFLAGS = -fobjc-arc \
-	-I$(THEOS_PROJECT_DIR)/TendiesXPrefs \
-	-I$(THEOS_PROJECT_DIR)/Sources \
+	-I./TendiesXPrefs \
+	-I./Sources \
 	-Wno-error
 TendiesXPrefs_FRAMEWORKS = Foundation UIKit
 TendiesXPrefs_LDFLAGS = -undefined dynamic_lookup

@@ -21,3 +21,6 @@ xcuserdata/
 # 设备日志（从手机拷出来的，不要进仓库）
 *.log
 TendiesX.log*
+
+# 壁纸素材（几十 MB 的二进制，不进仓库；要随包分发请放 layout/ 下）
+*.tendies

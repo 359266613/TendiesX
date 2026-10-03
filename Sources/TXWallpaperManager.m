@@ -6,11 +6,15 @@
 
 #pragma mark - 渲染层
 
+/// 渲染层：video 型走 AVPlayerLooper 循环播放；ca / image 型先退化成静态兜底图，
+/// 保证「挂载链路」可见可用，后续再接 CoreAnimation(.ca/CAAML) 渲染。
 @interface TXWallpaperRenderer : UIView
 @property (nonatomic, strong) TXTendiesPackage *package;
 @property (nonatomic, strong) AVQueuePlayer *player;
 @property (nonatomic, strong) AVPlayerLooper *looper;
 @property (nonatomic, strong) AVPlayerLayer *playerLayer;
+@property (nonatomic, strong) UIImageView *imageView;
+@property (nonatomic, copy)   NSString *mode;
 - (void)tx_start;
 - (void)tx_pause;
 @end
@@ -21,31 +25,59 @@
     self = [super initWithFrame:CGRectZero];
     if (self) {
         _package = package;
-        self.backgroundColor = UIColor.clearColor;
+        self.backgroundColor = UIColor.blackColor;
         self.clipsToBounds = YES;
         self.userInteractionEnabled = YES;
 
-        AVPlayerItem *item = [AVPlayerItem playerItemWithURL:package.videoURL];
-        _player = [AVQueuePlayer queuePlayerWithItems:@[item]];
-        _player.muted = YES;
-        _looper = [AVPlayerLooper playerLooperWithPlayer:_player templateItem:item];
-
-        _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
-        _playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
-        [self.layer addSublayer:_playerLayer];
-
-        TXLog(@"渲染层创建: name=%@ video=%@", package.displayName, package.videoURL.path);
+        if (package.videoURL) {
+            [self tx_setupVideo];
+        } else if (package.fallbackImageURL) {
+            [self tx_setupStaticImage];
+        } else {
+            _mode = @"empty";
+            TXLog(@"渲染层: 无可渲染内容（既无视频也无图片）");
+        }
     }
     return self;
+}
+
+// 视频型：AVQueuePlayer + AVPlayerLooper 无缝循环
+- (void)tx_setupVideo {
+    _mode = @"video";
+    AVPlayerItem *item = [AVPlayerItem playerItemWithURL:_package.videoURL];
+    _player = [AVQueuePlayer queuePlayerWithItems:@[item]];
+    _player.muted = YES;
+    _looper = [AVPlayerLooper playerLooperWithPlayer:_player templateItem:item];
+
+    _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
+    _playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+    [self.layer addSublayer:_playerLayer];
+
+    TXLog(@"渲染层: video 模式 video=%@", _package.videoURL.path);
+}
+
+// ca / image 型：暂时显示静态兜底图（.ca 里的 Background 层资源或最大图）
+- (void)tx_setupStaticImage {
+    _mode = @"static";
+    UIImage *image = [UIImage imageWithContentsOfFile:_package.fallbackImageURL.path];
+    _imageView = [[UIImageView alloc] initWithImage:image];
+    _imageView.frame = self.bounds;
+    _imageView.contentMode = UIViewContentModeScaleAspectFill;
+    _imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [self addSubview:_imageView];
+
+    TXLog(@"渲染层: static 兜底模式 kind=%@ image=%@ (%@)，.ca 渲染待接入",
+          _package.kind, _package.fallbackImageURL.path, image ? @"已加载" : @"解码失败");
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.playerLayer.frame = self.bounds;
+    self.imageView.frame = self.bounds;
 }
 
-- (void)tx_start  { [self.player play];  }
-- (void)tx_pause  { [self.player pause]; }
+- (void)tx_start { [self.player play];  }
+- (void)tx_pause { [self.player pause]; }
 
 @end
 
@@ -124,7 +156,9 @@
     TXLog(@"重新加载: enabled=%d interaction=%d parallax=%d path=%@ -> %@",
           prefs.enabled, prefs.interactionEnabled, prefs.parallaxEnabled,
           path.length ? path : @"(空)",
-          self.activePackage ? self.activePackage.displayName : @"未解析出可用壁纸");
+          self.activePackage
+              ? [NSString stringWithFormat:@"%@(%@)", self.activePackage.displayName, self.activePackage.kind]
+              : @"未解析出可用壁纸");
 
     NSArray<UIView *> *views = self.renderers.keyEnumerator.allObjects;
     if (views.count) {
@@ -159,7 +193,7 @@
     TXWallpaperRenderer *renderer = [[TXWallpaperRenderer alloc] initWithPackage:self.activePackage];
     renderer.frame = view.bounds;
     renderer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    // 放在最上层盖住系统静态壁纸（系统原图在 contentView 里，被不透明视频遮住即可）
+    // 放在最上层盖住系统静态壁纸（系统原图在 contentView 里，被不透明内容遮住即可）
     [view addSubview:renderer];
     [self.renderers setObject:renderer forKey:view];
     [renderer tx_start];
@@ -171,9 +205,9 @@
         [renderer addSubview:interaction];
     }
 
-    TXLog(@"已挂载: %@ -> %@ (bounds=%@)",
-          self.activePackage.displayName, NSStringFromClass(view.class),
-          NSStringFromCGRect(view.bounds));
+    TXLog(@"已挂载: %@ (%@/%@) -> %@ (bounds=%@)",
+          self.activePackage.displayName, self.activePackage.kind, renderer.mode,
+          NSStringFromClass(view.class), NSStringFromCGRect(view.bounds));
 }
 
 - (void)layoutWallpaperWithView:(UIView *)view {

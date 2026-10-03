@@ -6,6 +6,7 @@
 
 #import "TXPreferencesUI.h"
 #import "TXLogger.h"
+#import <objc/runtime.h>
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
@@ -14,6 +15,21 @@ static NSString *const kTXTendiesDirs[] = {
     @"/var/mobile/Media/TendiesX",
     nil
 };
+
+#pragma mark - specifiers 写回（面板白屏的关键）
+
+/// 调整：PSListController 的表数据源读的是它自己的 `_specifiers` 实例变量。
+/// 只 `return` 数组而不写回该 ivar 时，日志能看到 specifiers 已构建，但界面全白。
+/// 这里用运行期取 ivar 写入，避免为拿偏移而引入整套 Preferences 私有头。
+static void TXAssignSpecifiers(PSListController *controller, NSArray *specifiers) {
+    static Ivar ivar = NULL;
+    if (!ivar) {
+        ivar = class_getInstanceVariable(object_getClass(controller), "_specifiers");
+    }
+    if (ivar) {
+        object_setIvar(controller, ivar, specifiers);
+    }
+}
 
 #pragma mark - 偏好读写
 
@@ -41,7 +57,9 @@ static BOOL TXPrefBool(NSString *key, BOOL fallback) {
 #pragma mark - 扫描
 
 static NSString *TXDisplayName(NSString *path) {
-    return [[path lastPathComponent] stringByDeletingPathExtension];
+    NSString *name = [[path lastPathComponent] stringByDeletingPathExtension];
+    NSRange dash = [name rangeOfString:@"-\\d+w-\\d+h" options:NSRegularExpressionSearch];
+    return dash.location == NSNotFound ? name : [name substringToIndex:dash.location];
 }
 
 static NSArray<NSString *> *TXScanPackages(void) {
@@ -50,9 +68,7 @@ static NSArray<NSString *> *TXScanPackages(void) {
 
     for (int i = 0; kTXTendiesDirs[i] != nil; i++) {
         NSString *dir = kTXTendiesDirs[i];
-        NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:dir error:NULL];
-        TXLog(@"面板扫描 %@ -> %lu 项", dir, (unsigned long)items.count);
-        for (NSString *item in items) {
+        for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
             NSString *full = [dir stringByAppendingPathComponent:item];
             BOOL isDir = NO;
             if (![fm fileExistsAtPath:full isDirectory:&isDir]) {
@@ -80,7 +96,7 @@ static NSArray *gTXPackageSpecifiers = nil;
 
 - (NSArray *)specifiers {
     if (!gTXPackageSpecifiers) {
-        TXLog(@"面板: 开始构建壁纸列表 specifiers");
+        TXLog(@"面板: 开始构建壁纸列表");
         NSMutableArray *specs = [NSMutableArray array];
         NSString *current = TXPrefGet(@"ActivePackagePath");
 
@@ -95,33 +111,27 @@ static NSArray *gTXPackageSpecifiers = nil;
 
         for (NSString *path in packages) {
             BOOL selected = [path isEqualToString:current];
-            NSString *title = [NSString stringWithFormat:@"%@%@", selected ? @"✓ " : @"", TXDisplayName(path)];
-
-            PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:title
-                                                              target:self
-                                                                 set:nil
-                                                                 get:nil
-                                                              detail:nil
-                                                                cell:TXCellButton
-                                                                edit:nil];
+            PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:
+                                 [NSString stringWithFormat:@"%@%@", selected ? @"✓ " : @"", TXDisplayName(path)]
+                                                              target:self set:nil get:nil detail:nil
+                                                                cell:TXCellButton edit:nil];
             [spec setButtonAction:@selector(tx_pickPackage:)];
             [spec setProperty:path forKey:@"txPackagePath"];
             [specs addObject:spec];
         }
 
-        PSSpecifier *autoSpec = [PSSpecifier groupSpecifierWithName:@"设为自动（取扫描到的第一个）"];
-        [specs addObject:autoSpec];
-
-        PSSpecifier *autoCell = [PSSpecifier preferenceSpecifierNamed:@"自动"
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"恢复自动"]];
+        PSSpecifier *autoCell = [PSSpecifier preferenceSpecifierNamed:@"自动（取扫描到的第一个）"
                                                               target:self set:nil get:nil detail:nil
                                                                 cell:TXCellButton edit:nil];
         [autoCell setButtonAction:@selector(tx_pickPackage:)];
         [autoCell setProperty:@"自动" forKey:@"txPackagePath"];
         [specs addObject:autoCell];
 
-        gTXPackageSpecifiers = specs;
-        TXLog(@"面板: 壁纸列表构建完成，%lu 个 specifier", (unsigned long)specs.count);
+        gTXPackageSpecifiers = [specs copy];
+        TXLog(@"面板: 壁纸列表构建完成，%lu 个", (unsigned long)gTXPackageSpecifiers.count);
     }
+    TXAssignSpecifiers(self, gTXPackageSpecifiers);
     return gTXPackageSpecifiers;
 }
 
@@ -158,6 +168,7 @@ static NSArray *gTXRootSpecifiers = nil;
 
 @interface TXRootListController ()
 - (PSSpecifier *)tx_switchNamed:(NSString *)name set:(SEL)set get:(SEL)get;
+- (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs;
 - (void)tx_rescan:(PSSpecifier *)specifier;
 @end
 
@@ -173,62 +184,61 @@ static NSArray *gTXRootSpecifiers = nil;
         TXLog(@"面板: 开始构建根 specifiers");
         NSMutableArray *specs = [NSMutableArray array];
 
+        #pragma mark 开关
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"开关"]];
-
         [specs addObject:[self tx_switchNamed:@"启用"
                                           set:@selector(tx_setEnabled:specifier:)
                                           get:@selector(tx_getEnabled:)]];
-
         [specs addObject:[self tx_switchNamed:@"触摸交互"
                                           set:@selector(tx_setInteraction:specifier:)
                                           get:@selector(tx_getInteraction:)]];
-
         [specs addObject:[self tx_switchNamed:@"陀螺仪视差"
                                           set:@selector(tx_setParallax:specifier:)
                                           get:@selector(tx_getParallax:)]];
 
+        #pragma mark 壁纸
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"壁纸"]];
-
         NSString *current = TXPrefGet(@"ActivePackagePath");
-        NSString *currentName = current.length ? TXDisplayName(current) : @"自动";
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:[NSString stringWithFormat:@"选择壁纸（当前：%@）", currentName]
-                                                       target:self
-                                                          set:nil
-                                                          get:nil
-                                                       detail:[TXPackageListController class]
-                                                         cell:TXCellLink
-                                                         edit:nil]];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:
+                      [NSString stringWithFormat:@"选择壁纸（当前：%@）", current.length ? TXDisplayName(current) : @"自动"]
+                                                       target:self set:nil get:nil
+                                                     detail:[TXPackageListController class]
+                                                       cell:TXCellLink edit:nil]];
+        [self tx_buttonNamed:@"重新扫描目录" action:@selector(tx_rescan:) to:specs];
 
-        PSSpecifier *rescan = [PSSpecifier preferenceSpecifierNamed:@"重新扫描目录"
-                                                            target:self set:nil get:nil detail:nil
-                                                              cell:TXCellButton edit:nil];
-        [rescan setButtonAction:@selector(tx_rescan:)];
-        [specs addObject:rescan];
-
+        #pragma mark 说明
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"说明"]];
-
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"把 .tendies 放到 /var/mobile/Library/TendiesX/，再回这里点「重新扫描目录」"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
-
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"运行日志：/var/mobile/Library/Logs/TendiesX.log"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
 
-        gTXRootSpecifiers = specs;
-        TXLog(@"面板: 根 specifiers 构建完成，%lu 个", (unsigned long)specs.count);
+        #pragma mark 关于我们（固定：所有插件一致）
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"关于我们"]];
+        [self tx_buttonNamed:@"Sileo 越狱源" action:@selector(openSileoRepo:) to:specs];
+        [self tx_buttonNamed:@"TG分享频道"  action:@selector(openTelegramChannel:) to:specs];
+        [self tx_buttonNamed:@"QQ交流群组"  action:@selector(openQQGroup:) to:specs];
+
+        gTXRootSpecifiers = [specs copy];
+        TXLog(@"面板: 根 specifiers 构建完成，%lu 个", (unsigned long)gTXRootSpecifiers.count);
     }
+    TXAssignSpecifiers(self, gTXRootSpecifiers);
     return gTXRootSpecifiers;
 }
 
 - (PSSpecifier *)tx_switchNamed:(NSString *)name set:(SEL)set get:(SEL)get {
-    return [PSSpecifier preferenceSpecifierNamed:name
-                                          target:self
-                                             set:set
-                                             get:get
-                                          detail:nil
-                                            cell:TXCellSwitch
-                                            edit:nil];
+    return [PSSpecifier preferenceSpecifierNamed:name target:self set:set get:get
+                                          detail:nil cell:TXCellSwitch edit:nil];
+}
+
+// 通用：往规格列表末尾加一个按钮型 specifier
+- (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs {
+    PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:name target:self set:nil get:nil
+                                                       detail:nil cell:TXCellButton edit:nil];
+    [spec setButtonAction:action];
+    [specs addObject:spec];
 }
 
 - (void)viewDidLoad {
@@ -239,8 +249,6 @@ static NSArray *gTXRootSpecifiers = nil;
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    TXLog(@"面板: viewWillAppear，当前 specifiers=%lu", (unsigned long)[self specifiers].count);
-    // 每次进入都重建一次，避免 PSListController 缓存了空数组导致白屏
     [self reloadSpecifiers];
 }
 
@@ -260,15 +268,44 @@ static NSArray *gTXRootSpecifiers = nil;
 - (void)tx_setEnabled:(id)value specifier:(PSSpecifier *)specifier {
     TXPrefSet(@"Enabled", value);
     gTXRootSpecifiers = nil;
-    TXLog(@"面板: Enabled -> %@", value);
 }
-- (void)tx_setInteraction:(id)value specifier:(PSSpecifier *)specifier {
-    TXPrefSet(@"InteractionEnabled", value);
-    TXLog(@"面板: InteractionEnabled -> %@", value);
+- (void)tx_setInteraction:(id)value specifier:(PSSpecifier *)specifier { TXPrefSet(@"InteractionEnabled", value); }
+- (void)tx_setParallax:(id)value specifier:(PSSpecifier *)specifier    { TXPrefSet(@"ParallaxEnabled", value); }
+
+#pragma mark - 关于我们（固定：scheme 优先 + 网页兜底）
+
+- (void)openURL:(NSURL *)primary fallback:(NSURL *)fallback {
+    UIApplication *app = UIApplication.sharedApplication;
+    if (primary) {
+        [app openURL:primary options:@{} completionHandler:^(BOOL success) {
+            if (!success && fallback) {
+                [app openURL:fallback options:@{} completionHandler:nil];
+            }
+        }];
+    } else if (fallback) {
+        [app openURL:fallback options:@{} completionHandler:nil];
+    }
 }
-- (void)tx_setParallax:(id)value specifier:(PSSpecifier *)specifier {
-    TXPrefSet(@"ParallaxEnabled", value);
-    TXLog(@"面板: ParallaxEnabled -> %@", value);
+
+- (void)openSileoRepo {
+    NSString *source = @"https://axs66.github.io/pro";
+    NSString *encoded = [source stringByAddingPercentEncodingWithAllowedCharacters:
+                         NSCharacterSet.URLQueryAllowedCharacterSet] ?: source;
+    [self openURL:[NSURL URLWithString:[NSString stringWithFormat:@"sileo://source/%@", encoded]]
+         fallback:[NSURL URLWithString:source]];
 }
+- (void)openSileoRepo:(id)_          { [self openSileoRepo]; }
+
+- (void)openTelegramChannel {
+    [self openURL:[NSURL URLWithString:@"tg://resolve?domain=wxfx8"]
+         fallback:[NSURL URLWithString:@"https://t.me/wxfx8"]];
+}
+- (void)openTelegramChannel:(id)_    { [self openTelegramChannel]; }
+
+- (void)openQQGroup {
+    [self openURL:[NSURL URLWithString:@"http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=b9yIV3X8xKi3ZZUC7YXIr1YasKOzjYnm&authKey=ReN7wx79FV6Y4EIowsWSljNRUTSaGfgwWlmRzuvpWpBxl%2BCEKz%2BMNP3JePx1mMQ8&noverify=0&group_code=1001525693"]
+         fallback:nil];
+}
+- (void)openQQGroup:(id)_            { [self openQQGroup]; }
 
 @end
