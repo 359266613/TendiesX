@@ -132,7 +132,6 @@ static NSString *TXDisplayName(NSString *path) {
 - (void)tx_installPoster:(id)sender;
 - (void)tx_cleanupDuplicates:(id)sender;
 - (void)tx_pickFiles:(id)sender;
-- (void)tx_rescan:(id)sender;
 - (void)pollResult:(NSUInteger)attempt;
 - (void)notify:(NSString *)name;
 - (void)alert:(NSString *)message;
@@ -183,7 +182,6 @@ static NSString *TXDisplayName(NSString *path) {
         @"install": @"tx_installPoster:",
         @"cleanup": @"tx_cleanupDuplicates:",
         @"pick": @"tx_pickFiles:",
-        @"rescan": @"tx_rescan:",
     };
     for (PSSpecifier *spec in specs) {
         if (spec.buttonAction || !spec.identifier.length) {
@@ -216,7 +214,17 @@ static NSString *TXDisplayName(NSString *path) {
     if (!spec) {
         return;
     }
-    NSString *path = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kDomain];
+    NSString *path = [defaults stringForKey:@"SourcePath"];
+
+    // 素材是丢进目录就能用的，所以这里不靠任何"扫描"动作：
+    // 每次进面板都自己核对一次，选中的文件被 Filza 删了就把选择清掉（否则装的时候才发现）
+    if (path.length && ![NSFileManager.defaultManager fileExistsAtPath:path]) {
+        TXLog(@"面板: 选中的素材已不存在，自动清掉选择：%@", path);
+        [defaults removeObjectForKey:@"SourcePath"];
+        [defaults synchronize];
+        path = nil;
+    }
     NSString *name = path.length ? TXDisplayName(path) : @"未选择";
 
     [spec setProperty:[TXDetailCell class] forKey:@"cellClass"];
@@ -296,11 +304,6 @@ static NSString *TXDisplayName(NSString *path) {
         }
         [weakSelf alert:message.length ? message : @"已发出请求，但没等到回复（详情看 TendiesX.log）"];
     });
-}
-
-- (void)tx_rescan:(id)sender {
-    TXLog(@"面板: 重新扫描素材目录");
-    [self reloadSpecifiers];
 }
 
 #pragma mark - 从「文件」App 导入

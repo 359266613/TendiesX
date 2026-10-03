@@ -42,7 +42,7 @@
 			<key>label</key>
 			<string>素材</string>
 			<key>footerText</key>
-			<string>素材目录：/var/mobile/Library/TendiesX/（压缩包和已解包目录都行，也可用 Filza 直接丢进去）</string>
+			<string>素材目录：/var/mobile/Library/TendiesX/（压缩包和已解包目录都行，也可用 Filza 直接丢进去；进入本页会实时重扫，不需要手动刷新）</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -91,16 +91,6 @@
 			<string>tx_pickFiles:</string>
 			<key>id</key>
 			<string>pick</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>重新扫描素材目录</string>
-			<key>action</key>
-			<string>tx_rescan:</string>
-			<key>id</key>
-			<string>rescan</string>
 		</dict>
 	</array>
 	<key>title</key>
