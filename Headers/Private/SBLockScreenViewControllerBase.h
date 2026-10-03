@@ -129,7 +129,7 @@
 - (void)updateStatusBarForLockScreenComeback;
 - (void)updateStatusBarForLockScreenTeardown;
 - (void)viewDidLoad;
-- (void)viewWillTransitionToSize:(struct CGSize { double x0; double x1; })size withTransitionCoordinator:(id)coordinator;
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id)coordinator;
 - (id)wakeEffectView;
 - (_Bool)willUIUnlockFromSource:(int)source;
 

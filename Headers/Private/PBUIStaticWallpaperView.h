@@ -41,15 +41,15 @@
 + (_Bool)isRunningInPreferencesApp;
 
 /* instance methods */
-- (id)_averageColorInContentViewRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect smudgeRadius:(double)radius;
+- (id)_averageColorInContentViewRect:(CGRect)rect smudgeRadius:(double)radius;
 - (id)_computeAverageColor;
-- (double)_contrastInContentViewRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
+- (double)_contrastInContentViewRect:(CGRect)rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
 - (id)_createColorBoxes;
 - (void)_displayImage:(id)image;
 - (id)_displayedImage;
 - (id)_displayedImageURL;
 - (void)_generateImageForImage:(id)image cacheKey:(id)key options:(unsigned long long)options downsampleFactor:(double)factor needsDimmingTreatment:(_Bool)treatment needsInactiveAppearanceTreatment:(_Bool)treatment averageColorProvider:(id /* block */)provider generationHandler:(id /* block */)handler;
-- (struct CGSize { double x0; double x1; })_imageSize;
+- (CGSize)_imageSize;
 - (id)_sampleImage;
 - (void)_setDisplayedImage:(id)image;
 - (void)_setDisplayedImageURL:(id)url;
@@ -63,20 +63,20 @@
 - (id)cacheUniqueIdentifier;
 - (id)colorBoxes;
 - (double)contrast;
-- (double)contrastInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
+- (double)contrastInRect:(CGRect)rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
 - (double)cropZoomScale;
 - (id)displayedImageHashData;
 - (id)displayedImageHashString;
 - (_Bool)handlesInactiveAppearanceTreatment;
 - (_Bool)hasContentOutsideVisibleBounds;
 - (_Bool)imageRequiresLuminanceTreatment;
-- (id)initWithFrame:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })frame configuration:(id)configuration variant:(long long)variant cacheGroup:(id)group delegate:(id)delegate options:(unsigned long long)options;
+- (id)initWithFrame:(CGRect)frame configuration:(id)configuration variant:(long long)variant cacheGroup:(id)group delegate:(id)delegate options:(unsigned long long)options;
 - (_Bool)isDisplayingWallpaperWithConfiguration:(id)configuration forVariant:(long long)variant;
 - (_Bool)needsInactiveAppearanceTreatment;
 - (void)preheatImageData;
 - (void)setColorBoxes:(id)boxes;
-- (void)setContentsRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect;
-- (void)setCropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect zoomScale:(double)scale;
+- (void)setContentsRect:(CGRect)rect;
+- (void)setCropRect:(CGRect)rect zoomScale:(double)scale;
 - (void)setDisplayedImageHashData:(id)data;
 - (void)setDisplayedImageHashString:(id)string;
 - (void)setNeedsInactiveAppearanceTreatment:(_Bool)treatment;

@@ -9,6 +9,7 @@
 #define SBWallpaperController_h
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import "TXPrivateTypes.h"
 #import "PBUIWallpaperViewController.h"
 #import "PBUIWallpaperConfigurationManager.h"
 
@@ -58,7 +59,7 @@
 @property (nonatomic) long long activeVariant;
 @property (retain, nonatomic) id <BSInvalidatable> batterySaverAnimationAssertion;
 @property (readonly, copy, nonatomic) NSString *cachingIdentifier;
-@property (readonly, nonatomic) struct { long long x0; long long x1; double x2; } currentHomescreenStyleTransitionState;
+@property (readonly, nonatomic) PBUIWallpaperStyleTransitionState currentHomescreenStyleTransitionState;
 @property (readonly, copy) NSString *debugDescription;
 @property (readonly, copy) NSString *description;
 @property (readonly, nonatomic) double effectiveReachabilityYOffset;
@@ -103,7 +104,7 @@
 - (void)_reloadWallpaperAndFlushCaches:(_Bool)caches completionHandler:(id /* block */)handler;
 - (void)_saveWallpaperAggdKeysForLocations:(long long)locations withConfiguration:(id)configuration;
 - (void)_saveWallpaperCoreAnalyticsForLocations:(long long)locations withConfiguration:(id)configuration;
-- (struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })_screenBoundsForOrientation:(long long)orientation;
+- (CGRect)_screenBoundsForOrientation:(long long)orientation;
 - (void)_setupPosterBoardServiceNotifications;
 - (void)_snapshotScene:(id)scene withOptions:(long long)options traitCollection:(id)collection completion:(id /* block */)completion;
 - (void)_updateForLockScreenPosterConfiguration:(id)configuration homeScreenPosterConfiguration:(id)configuration;
@@ -123,15 +124,15 @@
 - (void)addReachabilityObserver:(id)observer;
 - (void)addWallpaperOverlay:(id)overlay;
 - (id)averageColorForVariant:(long long)variant;
-- (id)averageColorInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect forVariant:(long long)variant;
-- (id)averageColorInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect forVariant:(long long)variant withSmudgeRadius:(double)radius;
+- (id)averageColorInRect:(CGRect)rect forVariant:(long long)variant;
+- (id)averageColorInRect:(CGRect)rect forVariant:(long long)variant withSmudgeRadius:(double)radius;
 - (id)batterySaverAnimationAssertion;
 - (id)cachingIdentifier;
 - (void)cancelInProcessAnimations;
 - (double)contrastForVariant:(long long)variant;
-- (double)contrastInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect forVariant:(long long)variant;
+- (double)contrastInRect:(CGRect)rect forVariant:(long long)variant;
 - (id)createWallpaperFloatingViewForReason:(id)reason ignoreReplica:(_Bool)replica;
-- (struct { long long x0; long long x1; double x2; })currentHomescreenStyleTransitionState;
+- (PBUIWallpaperStyleTransitionState)currentHomescreenStyleTransitionState;
 - (void)deactivateOrientationSource:(long long)source;
 - (void)dealloc;
 - (long long)defaultInterfaceOrientationForSource:(long long)source;
@@ -185,7 +186,7 @@
 - (void)setWallpaperPresentingDelegate:(id)delegate;
 - (_Bool)setWallpaperStyle:(long long)style forPriority:(long long)priority forVariant:(long long)variant withAnimationFactory:(id)factory;
 - (void)setWallpaperStyleAnimationAssertion:(id)assertion;
-- (_Bool)setWallpaperStyleTransitionState:(struct { long long x0; long long x1; double x2; })state forPriority:(long long)priority forVariant:(long long)variant withAnimationFactory:(id)factory;
+- (_Bool)setWallpaperStyleTransitionState:(PBUIWallpaperStyleTransitionState)state forPriority:(long long)priority forVariant:(long long)variant withAnimationFactory:(id)factory;
 - (void)setWindowLevel:(double)level;
 - (void)setWindowScene:(id)scene;
 - (void)settings:(id)settings changedValueForKey:(id)key;
@@ -224,7 +225,7 @@
 - (void)wallpaperServer:(id)server setWallpaperColor:(id)color darkColor:(id)color forVariants:(long long)variants completionHandler:(id /* block */)handler;
 - (void)wallpaperServer:(id)server setWallpaperColorName:(id)name forVariants:(long long)variants completionHandler:(id /* block */)handler;
 - (void)wallpaperServer:(id)server setWallpaperGradient:(id)gradient forVariants:(long long)variants completionHandler:(id /* block */)handler;
-- (void)wallpaperServer:(id)server setWallpaperVideoWithWallpaperMode:(id)mode cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect wallpaperMode:(long long)mode completionHandler:(id /* block */)handler;
+- (void)wallpaperServer:(id)server setWallpaperVideoWithWallpaperMode:(id)mode cropRect:(CGRect)rect wallpaperMode:(long long)mode completionHandler:(id /* block */)handler;
 - (void)wallpaperServer:(id)server triggerPosterSignificantEventCompletionHandler:(id /* block */)handler;
 - (id)wallpaperStyleAnimationAssertion;
 - (id)wallpaperView:(id)view wallpaperConfigurationIncludingValueTypes:(unsigned long long)types;

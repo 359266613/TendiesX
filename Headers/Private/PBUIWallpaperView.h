@@ -9,6 +9,7 @@
 #define PBUIWallpaperView_h
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import "TXPrivateTypes.h"
 
 @class UIColor, UIImage, UIView, _UILegibilitySettings, _UILegibilitySettingsProvider;
 @class PBUIWallpaperParallaxSettings, PBUIWallpaperPrototypeSettings;
@@ -58,7 +59,7 @@
 @property (readonly, nonatomic) _Bool contentStatic;
 @property (retain, nonatomic) UIView *contentView;
 @property (nonatomic) _Bool continuousColorSamplingEnabled;
-@property (readonly, nonatomic) struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; } cropRect;
+@property (readonly, nonatomic) CGRect cropRect;
 @property (readonly, nonatomic) double cropZoomScale;
 @property (readonly, copy) NSString *debugDescription;
 @property (weak, nonatomic) id <PBUILegibilitySettingsProviderDelegate> delegate;
@@ -99,28 +100,28 @@
 /* instance methods */
 - (void)_addParallax;
 - (void)_applyParallaxSettings;
-- (id)_averageColorInContentViewRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect smudgeRadius:(double)radius;
-- (id)_backdrop_generateImageFromImage:(id)image forBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includeTint:(_Bool)tint traitCollection:(id)collection;
+- (id)_averageColorInContentViewRect:(CGRect)rect smudgeRadius:(double)radius;
+- (id)_backdrop_generateImageFromImage:(id)image forBackdropParameters:(PBUIWallpaperBackdropParameters)parameters includeTint:(_Bool)tint traitCollection:(id)collection;
 - (void)_beginDisallowRasterizationBlock;
 - (id)_blurredImage;
 - (id)_blurredImageURL;
-- (id)_cacheKeyForParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includingTint:(_Bool)tint downsampleFactor:(double)factor traitCollection:(id)collection;
+- (id)_cacheKeyForParameters:(PBUIWallpaperBackdropParameters)parameters includingTint:(_Bool)tint downsampleFactor:(double)factor traitCollection:(id)collection;
 - (id)_computeAverageColor;
-- (double)_contrastInContentViewRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
+- (double)_contrastInContentViewRect:(CGRect)rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
 - (id)_displayedImage;
 - (_Bool)_dontUseShadow;
 - (void)_endDisallowRasterizationBlock;
-- (id)_fallbackImageWithOriginalSize:(struct CGSize { double x0; double x1; })size;
-- (id)_generateImageFromImage:(id)image forBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includeTint:(_Bool)tint traitCollection:(id)collection;
+- (id)_fallbackImageWithOriginalSize:(CGSize)size;
+- (id)_generateImageFromImage:(id)image forBackdropParameters:(PBUIWallpaperBackdropParameters)parameters includeTint:(_Bool)tint traitCollection:(id)collection;
 - (void)_handleVariantChange;
 - (void)_handleVisibilityChange;
-- (id)_imageForBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
-- (id)_imageURLForBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
+- (id)_imageForBackdropParameters:(PBUIWallpaperBackdropParameters)parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
+- (id)_imageURLForBackdropParameters:(PBUIWallpaperBackdropParameters)parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
 - (_Bool)_isParallaxActive;
 - (_Bool)_isParallaxEnabled;
 - (_Bool)_isParallaxMotionEnabled;
 - (_Bool)_isVisible;
-- (id)_material_generateImageFromImage:(id)image forBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters traitCollection:(id)collection;
+- (id)_material_generateImageFromImage:(id)image forBackdropParameters:(PBUIWallpaperBackdropParameters)parameters traitCollection:(id)collection;
 - (_Bool)_needsFallbackImageForBackdropGeneratedImage:(id)image;
 - (void)_notifyBlursInvalidated;
 - (id)_primaryColorOverride;
@@ -134,7 +135,7 @@
 - (void)_updateParallax;
 - (void)_updateRasterizationState;
 - (void)_updateScaleFactor;
-- (id)averageColorInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect withSmudgeRadius:(double)radius;
+- (id)averageColorInRect:(CGRect)rect withSmudgeRadius:(double)radius;
 - (id)blurredImage;
 - (id)blurredImageURL;
 - (id)cacheGroup;
@@ -143,9 +144,9 @@
 - (id)contentView;
 - (_Bool)continuousColorSamplingEnabled;
 - (double)contrast;
-- (double)contrastInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect;
-- (double)contrastInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
-- (struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })cropRect;
+- (double)contrastInRect:(CGRect)rect;
+- (double)contrastInRect:(CGRect)rect contrastWithinBoxes:(double *)boxes contrastBetweenBoxes:(double *)boxes;
+- (CGRect)cropRect;
 - (double)cropZoomScale;
 - (void)dealloc;
 - (id)delegate;
@@ -153,9 +154,9 @@
 - (_Bool)handlesInactiveAppearanceTreatment;
 - (_Bool)hasContentOutsideVisibleBounds;
 - (_Bool)hasVideo;
-- (id)imageForBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
-- (id)imageURLForBackdropParameters:(struct { long long x0; long long x1; long long x2; double x3; double x4; double x5; double x6; long long x7; })parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
-- (id)initWithFrame:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })frame configuration:(id)configuration variant:(long long)variant cacheGroup:(id)group delegate:(id)delegate options:(unsigned long long)options;
+- (id)imageForBackdropParameters:(PBUIWallpaperBackdropParameters)parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
+- (id)imageURLForBackdropParameters:(PBUIWallpaperBackdropParameters)parameters includeTint:(_Bool)tint overrideTraitCollection:(id)collection;
+- (id)initWithFrame:(CGRect)frame configuration:(id)configuration variant:(long long)variant cacheGroup:(id)group delegate:(id)delegate options:(unsigned long long)options;
 - (id)internalObserver;
 - (void)invalidate;
 - (_Bool)isContentStatic;
@@ -173,9 +174,9 @@
 - (void)prepareToDisappear;
 - (void)resetLegibilitySettingsForAverageColor:(id)color;
 - (void)setContentView:(id)view;
-- (void)setContentsRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect;
+- (void)setContentsRect:(CGRect)rect;
 - (void)setContinuousColorSamplingEnabled:(_Bool)enabled;
-- (void)setCropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect zoomScale:(double)scale;
+- (void)setCropRect:(CGRect)rect zoomScale:(double)scale;
 - (void)setDelegate:(id)delegate;
 - (void)setGeneratesBlurredImages:(_Bool)images;
 - (void)setHidden:(_Bool)hidden;

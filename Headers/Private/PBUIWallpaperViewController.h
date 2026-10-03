@@ -9,6 +9,7 @@
 #define PBUIWallpaperViewController_h
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import "TXPrivateTypes.h"
 #import "PBUIWallpaperView.h"
 #import "PBUIWallpaperConfigurationManager.h"
 
@@ -61,7 +62,7 @@
 @property (nonatomic) long long activeVariant;
 @property (copy, nonatomic) NSString *cachingIdentifier;
 @property (nonatomic) _Bool colorSamplingDisabled;
-@property (readonly, nonatomic) struct { long long x0; long long x1; double x2; } currentHomescreenStyleTransitionState;
+@property (readonly, nonatomic) PBUIWallpaperStyleTransitionState currentHomescreenStyleTransitionState;
 @property (readonly, copy) NSString *debugDescription;
 @property (readonly, copy) NSString *description;
 @property (retain, nonatomic) UITraitCollection *fakeBlurViewOverrideTraitCollection;
@@ -106,7 +107,7 @@
 - (_Bool)_isWallpaperHiddenForVariant:(long long)variant;
 - (_Bool)_isWallpaperView:(id)view displayingWallpaperWithConfiguration:(id)configuration forVariant:(long long)variant;
 - (id)_makeWallpaperViewWithConfiguration:(id)configuration forVariant:(long long)variant shared:(_Bool)shared options:(unsigned long long)options;
-- (id)_newWallpaperEffectViewForVariant:(long long)variant transitionState:(struct { long long x0; long long x1; double x2; })state;
+- (id)_newWallpaperEffectViewForVariant:(long long)variant transitionState:(PBUIWallpaperStyleTransitionState)state;
 - (id)_observersForVariant:(long long)variant;
 - (void)_precacheStyles:(id)styles usingTraitCollection:(id)collection;
 - (void)_reconfigureBlurViewsForVariant:(long long)variant;
@@ -115,7 +116,7 @@
 - (void)_removeWallpaperAnimationAssertion:(id)assertion;
 - (_Bool)_setDisallowRasterization:(_Bool)rasterization withReason:(id)reason reasons:(id)reasons;
 - (void)_setWallpaperHidden:(_Bool)hidden variant:(long long)variant reason:(id)reason;
-- (_Bool)_shouldSuspendMotionEffectsForState:(struct { long long x0; long long x1; double x2; })state;
+- (_Bool)_shouldSuspendMotionEffectsForState:(PBUIWallpaperStyleTransitionState)state;
 - (_Bool)_shouldSuspendMotionEffectsForStyle:(long long)style;
 - (id)_sourceForFakeBlurView:(id)view;
 - (void)_suspendOrResumeColorSampling;
@@ -124,9 +125,9 @@
 - (void)_updateAndPrewarmWallpapers;
 - (void)_updateBlurGeneration;
 - (void)_updateBlurImagesForVariant:(long long)variant;
-- (_Bool)_updateEffectViewForVariant:(long long)variant oldState:(struct { long long x0; long long x1; double x2; } *)state newState:(struct { long long x0; long long x1; double x2; } *)state oldEffectView:(id *)view newEffectView:(id *)view;
+- (_Bool)_updateEffectViewForVariant:(long long)variant oldState:(PBUIWallpaperStyleTransitionState *)state newState:(PBUIWallpaperStyleTransitionState *)state oldEffectView:(id *)view newEffectView:(id *)view;
 - (_Bool)_updateEffectViewForVariant:(long long)variant withFactory:(id)factory;
-- (void)_updateMotionEffectsForState:(struct { long long x0; long long x1; double x2; })state;
+- (void)_updateMotionEffectsForState:(PBUIWallpaperStyleTransitionState)state;
 - (void)_updateRasterizationState;
 - (void)_updateSeparateWallpaperForVariants:(long long)variants options:(unsigned long long)options wallpaperMode:(long long)mode;
 - (void)_updateSharedWallpaperWithOptions:(unsigned long long)options wallpaperMode:(long long)mode;
@@ -143,8 +144,8 @@
 - (long long)activeVariant;
 - (void)addObserver:(id)observer forVariant:(long long)variant;
 - (id)averageColorForVariant:(long long)variant;
-- (id)averageColorInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect forVariant:(long long)variant;
-- (id)averageColorInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect forVariant:(long long)variant withSmudgeRadius:(double)radius;
+- (id)averageColorInRect:(CGRect)rect forVariant:(long long)variant;
+- (id)averageColorInRect:(CGRect)rect forVariant:(long long)variant withSmudgeRadius:(double)radius;
 - (void)beginDelayingHomescreenStyleChangesForReason:(id)reason;
 - (void)beginSimulatedLiveWallpaperTouchWithReason:(id)reason;
 - (id)cachingIdentifier;
@@ -152,8 +153,8 @@
 - (void)cleanupOldSharedWallpaper:(id)wallpaper lockSreenWallpaper:(id)wallpaper homeScreenWallpaper:(id)wallpaper;
 - (_Bool)colorSamplingDisabled;
 - (double)contrastForVariant:(long long)variant;
-- (double)contrastInRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect forVariant:(long long)variant;
-- (struct { long long x0; long long x1; double x2; })currentHomescreenStyleTransitionState;
+- (double)contrastInRect:(CGRect)rect forVariant:(long long)variant;
+- (PBUIWallpaperStyleTransitionState)currentHomescreenStyleTransitionState;
 - (void)dealloc;
 - (id)description;
 - (id)descriptionBuilderWithMultilinePrefix:(id)prefix;
@@ -198,7 +199,7 @@
 - (id)setHomescreenWallpaperScale:(double)scale withAnimationFactory:(id)factory;
 - (void)setHomescreenWallpaperView:(id)view;
 - (void)setLockscreenOnlyWallpaperAlpha:(double)alpha;
-- (void)setLockscreenWallpaperContentsRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect;
+- (void)setLockscreenWallpaperContentsRect:(CGRect)rect;
 - (id)setLockscreenWallpaperScale:(double)scale withAnimationFactory:(id)factory;
 - (void)setLockscreenWallpaperView:(id)view;
 - (void)setReachabilityCoordinator:(id)coordinator;
@@ -208,7 +209,7 @@
 - (void)setWallpaperPresentingDelegate:(id)delegate;
 - (_Bool)setWallpaperStyle:(long long)style forPriority:(long long)priority forVariant:(long long)variant withAnimationFactory:(id)factory;
 - (void)setWallpaperStyleAnimationAssertion:(id)assertion;
-- (_Bool)setWallpaperStyleTransitionState:(struct { long long x0; long long x1; double x2; })state forPriority:(long long)priority forVariant:(long long)variant withAnimationFactory:(id)factory;
+- (_Bool)setWallpaperStyleTransitionState:(PBUIWallpaperStyleTransitionState)state forPriority:(long long)priority forVariant:(long long)variant withAnimationFactory:(id)factory;
 - (void)settings:(id)settings changedValueForKey:(id)key;
 - (id)sharedWallpaperView;
 - (_Bool)shouldAutorotate;
@@ -226,7 +227,7 @@
 - (void)updateWallpaperForLocations:(long long)locations withCompletion:(id /* block */)completion;
 - (_Bool)variantsShareWallpaper;
 - (void)viewDidLoad;
-- (void)viewWillTransitionToSize:(struct CGSize { double x0; double x1; })size withTransitionCoordinator:(id)coordinator;
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id)coordinator;
 - (id)wallpaperConfigurationForUpdatingWallpaperViewsForVariant:(long long)variant wallpaperMode:(long long)mode;
 - (id)wallpaperConfigurationForVariant:(long long)variant includingValuesForTypes:(unsigned long long)types wallpaperMode:(long long)mode;
 - (id)wallpaperConfigurationManager;

@@ -15,7 +15,7 @@
 @protocol PBUIProceduralWallpaperProvider;
 @protocol PBUIWallpaperConfigurationManagerDelegate;
 
-@interface PBUIWallpaperConfigurationManager : NSObject <BSDescriptionProviding> {
+@interface PBUIWallpaperConfigurationManager : NSObject {
     /* instance variables */
     unsigned long long _batchChangeCount;
     long long _batchNotifyVariants;
@@ -30,7 +30,7 @@
     NSMutableDictionary *_wallpaperImageCache;
     long long _wallpaperMode;
     double _wallpaperScale;
-    struct CGSize { double width; double height; } _wallpaperSize;
+    CGSize _wallpaperSize;
     long long _wallpaperSizeType;
 }
 
@@ -52,15 +52,15 @@
 @property (readonly, nonatomic) _Bool variantsShareWallpaperConfiguration;
 @property (nonatomic) long long wallpaperMode;
 @property (readonly, nonatomic) double wallpaperScale;
-@property (readonly, nonatomic) struct CGSize { double x0; double x1; } wallpaperSize;
-@property (readonly, nonatomic) struct CGSize { double x0; double x1; } wallpaperSizeIncludingParallaxOverhang;
+@property (readonly, nonatomic) CGSize wallpaperSize;
+@property (readonly, nonatomic) CGSize wallpaperSizeIncludingParallaxOverhang;
 @property (readonly, nonatomic) long long wallpaperSizeType;
 
 /* class methods */
 + (void)initialize;
 
 /* instance methods */
-- (struct CGAffineTransform { double x0; double x1; double x2; double x3; double x4; double x5; })_naturalPreferredTransform:(struct CGAffineTransform { double x0; double x1; double x2; double x3; double x4; double x5; })transform forNaturalSize:(struct CGSize { double x0; double x1; })size;
+- (CGAffineTransform)_naturalPreferredTransform:(CGAffineTransform)transform forNaturalSize:(CGSize)size;
 - (signed char)_providerForVariant:(long long)variant lockConfig:(id)config homeConfig:(id)config;
 - (void)beginChangeBatch;
 - (_Bool)cachedVariantsShareWallpaperConfiguration;
@@ -68,8 +68,8 @@
 - (void)clearCacheForVariants:(long long)variants;
 - (void)clearCacheForVariants:(long long)variants memoryOnly:(_Bool)only;
 - (void)clearDelayedChangeNotifications;
-- (struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })cropRectForOldCropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait zoomScale:(double)scale oldParallaxFactor:(double)factor forImageSize:(struct CGSize { double x0; double x1; })size newZoomScale:(double *)scale;
-- (struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })cropRectForViewPort:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })port portrait:(_Bool)portrait zoomScale:(double)scale parallaxFactor:(double)factor forImageSize:(struct CGSize { double x0; double x1; })size contentScaleFactor:(double)factor;
+- (CGRect)cropRectForOldCropRect:(CGRect)rect portrait:(_Bool)portrait zoomScale:(double)scale oldParallaxFactor:(double)factor forImageSize:(CGSize)size newZoomScale:(double *)scale;
+- (CGRect)cropRectForViewPort:(CGRect)port portrait:(_Bool)portrait zoomScale:(double)scale parallaxFactor:(double)factor forImageSize:(CGSize)size contentScaleFactor:(double)factor;
 - (id)dataStores;
 - (void)dealloc;
 - (void)delayNotifyingChangeForVariants:(long long)variants;
@@ -81,14 +81,14 @@
 - (_Bool)enableWallpaperDimming;
 - (void)endChangeBatch;
 - (id)fallbackWallpaperConfigurationForVarient:(long long)varient;
-- (void)getBestCropRect:(out struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; } *)rect zoomScale:(out double *)scale forImageSize:(struct CGSize { double x0; double x1; })size portrait:(_Bool)portrait parallaxFactor:(double)factor;
+- (void)getBestCropRect:(out CGRect *)rect zoomScale:(out double *)scale forImageSize:(CGSize)size portrait:(_Bool)portrait parallaxFactor:(double)factor;
 - (id)getWallpaperLegibilitySettingsForVariant:(long long)variant;
 - (_Bool)hasWallpaperImageForVariant:(long long)variant wallpaperMode:(long long)mode;
 - (id)homeScreenWallpaperConfiguration;
 - (id)homeScreenWallpaperConfigurationIncludingValuesForTypes:(unsigned long long)types;
 - (id)init;
 - (id)initWithWallpaperDataStores:(id)stores;
-- (id)initWithWallpaperDataStores:(id)stores wallpaperSize:(struct CGSize { double x0; double x1; })size scale:(double)scale sizeType:(long long)type;
+- (id)initWithWallpaperDataStores:(id)stores wallpaperSize:(CGSize)size scale:(double)scale sizeType:(long long)type;
 - (_Bool)isCachedVariantsShareWallpaperConfigurationValid;
 - (_Bool)isInChangeBatch;
 - (_Bool)isProceduralWallpaperInfoValid:(id)valid;
@@ -98,12 +98,12 @@
 - (id)lockScreenWallpaperConfigurationIncludingValuesForTypes:(unsigned long long)types;
 - (id)magnifyMode;
 - (void)migrateWallpaperOptionsForImageIfNecessaryForVariant:(long long)variant representingVariants:(long long)variants;
-- (id)migratedWallpaperOptionsForWallpaperOptions:(id)options originalImageSize:(struct CGSize { double x0; double x1; })size;
+- (id)migratedWallpaperOptionsForWallpaperOptions:(id)options originalImageSize:(CGSize)size;
 - (id)normalizeImage:(id)image;
 - (void)notifyDelegateOfChangesToVariants:(long long)variants;
 - (unsigned long long)numberOfCachedStaticImages;
 - (long long)parallaxDeviceType;
-- (double)parallaxFactorForCropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait forImageSize:(struct CGSize { double x0; double x1; })size zoomScale:(double)scale;
+- (double)parallaxFactorForCropRect:(CGRect)rect portrait:(_Bool)portrait forImageSize:(CGSize)size zoomScale:(double)scale;
 - (void)performMigrationWithFailureHandler:(id /* block */)handler;
 - (id)posterMigrationInfo;
 - (Class)proceduralWallpaperClassForIdentifier:(id)identifier;
@@ -127,7 +127,7 @@
 - (void)restoreDefaultWallpaperForAllVariantsAndNotify:(_Bool)notify;
 - (void)safeMigrateWallpaperImageIfNecessary;
 - (_Bool)safeMigrateWallpaperImageIfNecessaryForVariant:(long long)variant representingVariants:(long long)variants wallpaperMode:(long long)mode;
-- (void)saveCroppedVideo:(id)video toURL:(id)url cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect completionHandler:(id /* block */)handler;
+- (void)saveCroppedVideo:(id)video toURL:(id)url cropRect:(CGRect)rect completionHandler:(id /* block */)handler;
 - (void)setCachedVariantsShareWallpaperConfiguration:(_Bool)configuration;
 - (void)setCachedVariantsShareWallpaperConfigurationValid:(_Bool)valid;
 - (void)setDelegate:(id)delegate;
@@ -135,7 +135,7 @@
 - (void)setMagnifyMode:(id)mode;
 - (_Bool)setProceduralWallpaperIdentifier:(id)identifier options:(id)options forVariants:(long long)variants;
 - (void)setProceduralWallpaperProvider:(id)provider;
-- (_Bool)setVideoURL:(id)url forVariant:(long long)variant shoudCrop:(_Bool)crop relativeCropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect wallpaperMode:(long long)mode;
+- (_Bool)setVideoURL:(id)url forVariant:(long long)variant shoudCrop:(_Bool)crop relativeCropRect:(CGRect)rect wallpaperMode:(long long)mode;
 - (void)setWallpaperBundle:(id)bundle appearance:(id)appearance;
 - (_Bool)setWallpaperColor:(id)color forVariants:(long long)variants;
 - (_Bool)setWallpaperColorName:(id)name forVariants:(long long)variants;
@@ -171,8 +171,8 @@
 - (id)wallpaperOptionsForVariant:(long long)variant wallpaperMode:(long long)mode;
 - (id)wallpaperOriginalImageForVariant:(long long)variant wallpaperMode:(long long)mode;
 - (double)wallpaperScale;
-- (struct CGSize { double x0; double x1; })wallpaperSize;
-- (struct CGSize { double x0; double x1; })wallpaperSizeIncludingParallaxOverhang;
+- (CGSize)wallpaperSize;
+- (CGSize)wallpaperSizeIncludingParallaxOverhang;
 - (long long)wallpaperSizeType;
 - (id)wallpaperThumbnailImageDataForFulfillingLookupForConfiguration:(id)configuration;
 - (id)wallpaperThumbnailImageDataForVariant:(long long)variant wallpaperMode:(long long)mode;

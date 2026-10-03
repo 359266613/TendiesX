@@ -53,15 +53,15 @@
 - (void)_acquireFloatingDockBehaviorAssertionIfNecessaryForFloatingDockController:(id)controller;
 - (void)_acquireForceTouchOrientationUpdateDeferralAssertionForIconView:(id)view;
 - (void)_acquireForceTouchWindowLevelAssertionForIconView:(id)view;
-- (void)_animateTransitionToSize:(struct CGSize { double x0; double x1; })size andInterfaceOrientation:(long long)orientation withTransitionContext:(id)context;
+- (void)_animateTransitionToSize:(CGSize)size andInterfaceOrientation:(long long)orientation withTransitionContext:(id)context;
 - (void)_appIconForceTouchControllerDidDismissNotification:(id)notification;
 - (void)_appIconForceTouchControllerWillPresentNotification:(id)notification;
 - (id)_autorotationPreventionReasons;
-- (void)_cleanupAfterTransitionToSize:(struct CGSize { double x0; double x1; })size fromInterfaceOrientation:(long long)orientation withTransitionContext:(id)context;
+- (void)_cleanupAfterTransitionToSize:(CGSize)size fromInterfaceOrientation:(long long)orientation withTransitionContext:(id)context;
 - (void)_dismissAllIconForceTouchControllersDidFire:(id)fire;
 - (id)_homeScreenView;
 - (void)_iconEditingDidChange:(id)change;
-- (void)_prepareForTransitionToSize:(struct CGSize { double x0; double x1; })size andInterfaceOrientation:(long long)orientation withTransitionCoordinator:(id)coordinator;
+- (void)_prepareForTransitionToSize:(CGSize)size andInterfaceOrientation:(long long)orientation withTransitionCoordinator:(id)coordinator;
 - (void)_relinquishForceTouchOrientationUpdateDeferralAssertionForIconView:(id)view;
 - (void)_relinquishForceTouchWindowLevelAssertionForIconView:(id)view;
 - (void)_widgetEditViewDidDisappear:(id)disappear;
@@ -97,7 +97,7 @@
 - (void)viewDidDisappear:(_Bool)disappear;
 - (void)viewDidLayoutSubviews;
 - (void)viewWillAppear:(_Bool)appear;
-- (void)viewWillTransitionToSize:(struct CGSize { double x0; double x1; })size withTransitionCoordinator:(id)coordinator;
+- (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id)coordinator;
 - (id)widgetEditFloatingDockAssertion;
 - (id)widgetEditViewControllerOrientationUpdateDeferralAssertion;
 - (id)zStackParticipant;

@@ -17,7 +17,7 @@
 }
 
 @property _Bool allowsInPlaceFiltering;
-@property struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; } backdropRect;
+@property CGRect backdropRect;
 @property _Bool captureOnly;
 @property (weak) id <CABackdropLayerDelegate, CALayerDelegate> delegate;
 @property _Bool disablesOccludedBackdropBlurs;
@@ -42,7 +42,7 @@
 - (_Bool)_renderLayerDefinesProperty:(unsigned int)property;
 - (unsigned int)_renderLayerPropertyAnimationFlags:(unsigned int)flags;
 - (_Bool)allowsInPlaceFiltering;
-- (struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })backdropRect;
+- (CGRect)backdropRect;
 - (_Bool)captureOnly;
 - (void)didChangeValueForKey:(id)key;
 - (_Bool)disablesOccludedBackdropBlurs;
@@ -55,7 +55,7 @@
 - (_Bool)reducesCaptureBitDepth;
 - (double)scale;
 - (void)setAllowsInPlaceFiltering:(_Bool)filtering;
-- (void)setBackdropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect;
+- (void)setBackdropRect:(CGRect)rect;
 - (void)setCaptureOnly:(_Bool)only;
 - (void)setDisablesOccludedBackdropBlurs:(_Bool)blurs;
 - (void)setEnabled:(_Bool)enabled;

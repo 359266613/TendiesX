@@ -35,7 +35,7 @@
 /* instance methods */
 - (void)CAMLParser:(id)camlparser setValue:(id)value forKey:(id)key;
 - (id)CAMLTypeForKey:(id)key;
-- (struct Object { void * /* function */ *x0; struct Atomic { struct { int x0; } x0; } x1; unsigned int x2:8; unsigned int x3:24; } *)CA_copyRenderValue;
+- (void *)CA_copyRenderValue;
 - (_Bool)cachesInputImage;
 - (id)copyWithZone:(struct _NSZone *)zone;
 - (void)dealloc;

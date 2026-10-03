@@ -14,7 +14,7 @@
 
 @interface PBUIWallpaperOptions : NSObject <NSCopying, NSSecureCoding> {
     /* instance variables */
-    struct CGRect { struct CGPoint { double x; double y; } origin; struct CGSize { double width; double height; } size; } _cropRect;
+    CGRect _cropRect;
     _Bool _hasVideo;
     _Bool _magnifyEnabled;
     NSString *_name;
@@ -30,7 +30,7 @@
     double _zoomScale;
 }
 
-@property (nonatomic) struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; } cropRect;
+@property (nonatomic) CGRect cropRect;
 @property (readonly, copy) NSString *debugDescription;
 @property (readonly, copy) NSString *description;
 @property (nonatomic) _Bool hasVideo;
@@ -52,18 +52,18 @@
 @property (nonatomic) double zoomScale;
 
 /* class methods */
-+ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait;
-+ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video;
-+ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperKitData:(id)data;
-+ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status;
-+ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status wallpaperKitData:(id)data;
-+ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect supportsRotation:(_Bool)rotation rotationAngle:(double)angle portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status;
++ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect portrait:(_Bool)portrait;
++ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video;
++ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperKitData:(id)data;
++ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status;
++ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status wallpaperKitData:(id)data;
++ (id)optionsWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect supportsRotation:(_Bool)rotation rotationAngle:(double)angle portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status;
 + (_Bool)supportsSecureCoding;
 
 /* instance methods */
-- (struct CGSize { double x0; double x1; })bestWallpaperSizeForWallpaperSize:(struct CGSize { double x0; double x1; })size wallpaperScale:(double)scale deviceType:(long long)type imageScale:(double)scale;
+- (CGSize)bestWallpaperSizeForWallpaperSize:(CGSize)size wallpaperScale:(double)scale deviceType:(long long)type imageScale:(double)scale;
 - (id)copyWithZone:(struct _NSZone *)zone;
-- (struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })cropRect;
+- (CGRect)cropRect;
 - (id)description;
 - (id)descriptionBuilderWithMultilinePrefix:(id)prefix;
 - (id)descriptionWithMultilinePrefix:(id)prefix;
@@ -73,7 +73,7 @@
 - (id)init;
 - (id)initWithCoder:(id)coder;
 - (id)initWithContentsOfURL:(id)url;
-- (id)initWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect supportsRotation:(_Bool)rotation rotationAngle:(double)angle portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status wallpaperKitData:(id)data;
+- (id)initWithName:(id)name parallaxFactor:(double)factor zoomScale:(double)scale supportsCropping:(_Bool)cropping cropRect:(CGRect)rect supportsRotation:(_Bool)rotation rotationAngle:(double)angle portrait:(_Bool)portrait hasVideo:(_Bool)video stillTimeInVideo:(double)video wallpaperMode:(long long)mode wallpaperStatus:(long long)status wallpaperKitData:(id)data;
 - (id)initWithPersistentDataRepresentation:(id)representation;
 - (id)initWithStream:(id)stream;
 - (_Bool)isEqual:(id)equal;
@@ -86,7 +86,7 @@
 - (id)persistentDataRepresentation;
 - (id)persistentPropertyList;
 - (double)rotationAngle;
-- (void)setCropRect:(struct CGRect { struct CGPoint { double x0; double x1; } x0; struct CGSize { double x0; double x1; } x1; })rect;
+- (void)setCropRect:(CGRect)rect;
 - (void)setHasVideo:(_Bool)video;
 - (void)setMagnifyEnabled:(_Bool)enabled;
 - (void)setName:(id)name;
