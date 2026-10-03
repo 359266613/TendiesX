@@ -45,7 +45,11 @@ static void TXSaveInstalledManifest(NSArray<NSDictionary *> *manifest) {
     CFPreferencesSetAppValue((__bridge CFStringRef)kTXManifestKey,
                              (__bridge CFPropertyListRef)manifest,
                              (__bridge CFStringRef)kTXManifestDomain);
-    CFPreferencesAppSynchronize((__bridge CFStringRef)kTXManifestDomain);
+    Boolean synced = CFPreferencesAppSynchronize((__bridge CFStringRef)kTXManifestDomain);
+    // 顺带回读一次：之前"替换没生效"怀疑就是清单没落盘，这里把结果记下来
+    TXLog(@"[A] 安装清单写入 %lu 条（落盘=%@，回读 %lu 条）",
+          (unsigned long)manifest.count, synced ? @"成功" : @"失败",
+          (unsigned long)TXInstalledManifest().count);
 }
 
 /// descriptor 的 identifier 写在 <descriptor>/com.apple.posterkit.provider.descriptor.identifier，
@@ -118,6 +122,28 @@ static NSDictionary<NSString *, NSNumber *> *TXStoreIdentifierCounts(NSString *d
         }
     }
     return counts;
+}
+
+/// 本机库里是否存在「系统自带的」同 identifier 条目（版本号 >= 1000）。
+/// 只有这种情况才说明我们装的是"系统壁纸的变体"，替换旧副本才是对的。
+static BOOL TXStoreHasSystemDescriptor(NSString *descriptorsRoot, NSString *identifier) {
+    if (!identifier.length) {
+        return NO;
+    }
+    for (NSString *entry in [NSFileManager.defaultManager contentsOfDirectoryAtPath:descriptorsRoot
+                                                                             error:NULL]) {
+        if (TXIsJunkEntry(entry)) {
+            continue;
+        }
+        NSString *dir = [descriptorsRoot stringByAppendingPathComponent:entry];
+        if (!TXIsDirectory(dir)) {
+            continue;
+        }
+        if ([identifier isEqualToString:TXDescriptorIdentifierIn(dir)] && TXMaxVersionIn(dir) >= 1000) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 /// 删掉目标库里「identifier 命中且版本号 < 1000」的目录 —— 那些只可能是我们自己装的旧副本。
@@ -426,26 +452,32 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
         return installed;
     }
 
-    // 2) 本机库里已有的 identifier（= 这台设备认可的原生壁纸）
+    // 2) 本机库里已有的 identifier -> 份数（判断"这台设备认可哪些原生壁纸"）
     NSDictionary<NSString *, NSNumber *> *storeCounts = TXStoreIdentifierCounts(destRoot);
-    BOOL storeHasAnyOfOurs = NO;
+    BOOL hasStoreMatch = NO;
     for (NSDictionary *item in candidates) {
         if (((NSString *)item[@"identifier"]).length && storeCounts[item[@"identifier"]]) {
-            storeHasAnyOfOurs = YES;
+            hasStoreMatch = YES;
             break;
         }
     }
+    // 只有「源里带多个 descriptor」才可能是多机型变体包（如 iOS16.tendies 的 7400+7410），
+    // 这种才做变体过滤。独立素材（社区做的单文件素材等）一律照装，
+    // 绝不因为"本机库里没有同款"就把用户想装的壁纸丢掉。
+    BOOL filterVariants = hasStoreMatch && candidates.count > 1;
+    TXLog(@"[A] 源 %lu 个 descriptor，本机有同款=%@，变体过滤=%@",
+          (unsigned long)candidates.count, hasStoreMatch ? @"是" : @"否",
+          filterVariants ? @"开" : @"关");
 
-    // 3) 挑要装的：空壳跳过；.tendies 带多机型变体（如 7400/7410）时只装本机有同款的那个
-    //    —— 本机没有同款的变体装上去只会多一张黑图，白占收藏名额，这就是"已安装 2 个"的来源。
+    // 3) 挑要装的（空壳一律跳过：装了也是黑图）
     NSMutableArray<NSDictionary *> *selected = [NSMutableArray array];
     for (NSDictionary *item in candidates) {
         NSString *identifier = item[@"identifier"];
         if ([item[@"files"] unsignedIntegerValue] == 0) {
-            TXLog(@"[A] 跳过 %@（0 个文件，装了也是黑图）", item[@"name"]);
+            TXLog(@"[A] 跳过 %@（0 个文件）", item[@"name"]);
             continue;
         }
-        if (storeHasAnyOfOurs && !storeCounts[identifier]) {
+        if (filterVariants && !storeCounts[identifier]) {
             TXLog(@"[A] 跳过 %@（identifier=%@ 本机库里没有同款，属于其它机型变体）",
                   item[@"name"], identifier.length ? identifier : @"(读不到)");
             continue;
@@ -457,18 +489,22 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
         return installed;
     }
 
-    // 4) 替换：直接按 identifier 清库里的旧副本。
-    //    不再依赖安装清单（清单丢一次就会无限堆积，之前就是这么攒出 13 份 7400 的）——
-    //    判据只有「identifier 命中 + 版本号 < 1000」，系统自带的（几千）永远不碰。
-    NSMutableSet<NSString *> *targetIdentifiers = [NSMutableSet set];
+    // 4) 替换：**只清"系统同类壁纸的旧变体"**。
+    //    判据：库里已经存在同 identifier 的系统条目（版本号 >= 1000）—— 这时我们装的是它的变体，
+    //    旧变体必须删掉，否则收藏里会堆出 13 份 7400。
+    //    独立素材（库里没有系统同款）什么都不删：保持 v0.0.1-18 那种"各装各的"行为，
+    //    多个素材能共存，多余的副本交给「清理重复壁纸」处理。
+    NSMutableSet<NSString *> *replaceable = [NSMutableSet set];
     for (NSDictionary *item in selected) {
-        if (((NSString *)item[@"identifier"]).length) {
-            [targetIdentifiers addObject:item[@"identifier"]];
+        NSString *identifier = item[@"identifier"];
+        if (identifier.length && TXStoreHasSystemDescriptor(destRoot, identifier)) {
+            [replaceable addObject:identifier];
         }
     }
-    NSUInteger replaced = TXRemoveOurCopiesOfIdentifiers(destRoot, targetIdentifiers);
-    TXLog(@"[A] 替换：清掉旧副本 %lu 份；本次装 %lu 个（源 %lu 个）",
-          (unsigned long)replaced, (unsigned long)selected.count, (unsigned long)candidates.count);
+    NSUInteger replaced = TXRemoveOurCopiesOfIdentifiers(destRoot, replaceable);
+    TXLog(@"[A] 替换：清掉旧副本 %lu 份（可替换 identifier %lu 个）；本次装 %lu 个（源 %lu 个）",
+          (unsigned long)replaced, (unsigned long)replaceable.count,
+          (unsigned long)selected.count, (unsigned long)candidates.count);
 
     // 5) 复制 + 更新安装清单（清单只作记录，替换不依赖它）
     NSMutableArray<NSDictionary *> *manifest = [TXInstalledManifest() mutableCopy];
