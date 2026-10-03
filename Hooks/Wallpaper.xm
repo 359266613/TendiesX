@@ -11,7 +11,24 @@
 #import "TXPosterStoreProbe.h"
 #import <objc/runtime.h>
 
-#pragma mark - 1. 壁纸视图：挂载 / 布局 / 显隐 / 前后台生命周期
+#pragma mark - 容器查找
+
+//  关键修正：原来用 [vc valueForKey:@"wallpaperContainerView"] 读容器，
+//  但 UIKit 私有类普遍把 accessInstanceVariablesDirectly 关掉，KVC 会失败并被
+//  @try/@catch 静默吞掉 —— 这就是日志里「主壁纸容器」一次都没出现的原因。
+//  改成直接按名字读实例变量（沿继承链找），不依赖 KVC 策略。
+static void TXTryAttachContainer(id vc) {
+    if (!vc) {
+        return;
+    }
+    UIView *container = [TXWallpaperManager tx_ivarValue:vc named:@"_wallpaperContainerView"];
+    if (!container) {
+        return;   // 找不到就等启动几秒后的诊断日志说明
+    }
+    [TXWallpaperManager.sharedManager attachToWallpaperContainerView:container];
+}
+
+#pragma mark - 1. 壁纸视图：退路挂载 / 布局 / 显隐 / 前后台生命周期
 
 %hook PBUIWallpaperView
 
@@ -27,8 +44,7 @@
     [TXWallpaperManager.sharedManager layoutWallpaperWithView:self];
 }
 
-// 诊断用：下拉通知中心 / 上滑多任务时，系统可能会隐藏壁纸视图，
-// 这就是「壁纸闪一下就没」的原因。打出来才能确认。
+// 诊断用：下拉通知中心 / 上滑多任务时系统可能隐藏壁纸视图
 - (void)setHidden:(BOOL)hidden {
     %orig;
     if (hidden) {
@@ -55,21 +71,22 @@
 
 %hook PBUIWallpaperViewController
 
-// 容器布局完成后把自定义渲染层挂到 _wallpaperContainerView。
-// 这是 Zone 的做法：壁纸视图的 contentView 在 iOS 16 上可能是
-// PBUIFakeBlurView / PBUISnapshotReplicaView 这类副本，挂进去会"松手就消失"。
+// 三个时机都试，任一个先到就挂上（viewDidLoad 时容器可能还没建，layout 后一定有）
+- (void)viewDidLoad {
+    %orig;
+    TXLog(@"hook: PBUIWallpaperViewController -viewDidLoad");
+    TXTryAttachContainer(self);
+}
+
 - (void)viewDidLayoutSubviews {
     %orig;
+    TXTryAttachContainer(self);
+}
 
-    UIView *container = nil;
-    @try {
-        container = [self valueForKey:@"wallpaperContainerView"];
-    } @catch (NSException *exception) {
-        // KVC 取不到就退回壁纸视图那条路
-    }
-    if (container) {
-        [TXWallpaperManager.sharedManager attachToWallpaperContainerView:container];
-    }
+- (void)viewDidAppear:(BOOL)animated {
+    %orig;
+    TXLog(@"hook: PBUIWallpaperViewController -viewDidAppear");
+    TXTryAttachContainer(self);
 }
 
 - (void)noteWallpapersDidUpdate {
@@ -122,18 +139,22 @@
           UIDevice.currentDevice.model,
           TXLogFilePath() ?: @"(解析失败，只能看系统日志)");
 
-    Class cls = objc_getClass("PBUIWallpaperView");
-    TXLog(@"PBUIWallpaperView = %@", cls ? NSStringFromClass(cls) : @"(缺失)");
-    if (!cls) {
-        TXLog(@"警告: 本系统没有 PBUIWallpaperView，壁纸 hook 不会生效");
-    }
-    TXLog(@"CAPackage = %@ | BSUICAPackageView = %@",
-          objc_getClass("CAPackage") ? @"有" : @"缺失",
+    Class viewClass = objc_getClass("PBUIWallpaperView");
+    Class vcClass = objc_getClass("PBUIWallpaperViewController");
+    TXLog(@"PBUIWallpaperView = %@ | PBUIWallpaperViewController = %@",
+          viewClass ? @"有" : @"缺失", vcClass ? @"有" : @"缺失");
+    TXLog(@"BSUICAPackageView = %@",
           objc_getClass("BSUICAPackageView") ? @"有" : @"缺失");
 
-    // sharedManager 首次访问时内部就会 reloadFromDisk，把偏好与解析结果打进日志
+    // sharedManager 首次访问时内部就会 reloadFromDisk
     (void)TXWallpaperManager.sharedManager;
 
-    // 探测系统海报存储落点（确定 ca 型 .tendies 的安装位置后即可去掉）
+    // 探测系统海报存储落点（确定 descriptor 安装位置用，可随时去掉）
     TXProbePosterStore();
+
+    // 6 秒后打一次诊断：容器到底找没找到、渲染层现在挂在哪
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [TXWallpaperManager.sharedManager logContainerDiagnostics];
+    });
 }

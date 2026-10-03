@@ -202,4 +202,124 @@ void TXProbePosterStore(void) {
     TXProbeAppContainers(&budget);
 
     TXLog(@"---- PosterBoard 存储探测结束（剩余额度 %lu）----", (unsigned long)budget);
+
+    // 顺手把「现成一个 descriptor 的完整结构」打出来，作为 route A 的复刻模板
+    TXProbeDescriptorTemplate();
+}
+
+#pragma mark - descriptor 结构探测（route A 的复刻模板）
+
+/// 定位 <PosterBoard 容器>/Library/Application Support/PRBPosterExtensionDataStore
+static NSString *TXProbeFindPosterStore(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    static NSString *const kRoots[] = {
+        @"/var/mobile/Containers/Data/Application",
+        @"/var/containers/Data/System",
+        nil
+    };
+    for (int r = 0; kRoots[r] != nil; r++) {
+        for (NSString *uuid in [fm contentsOfDirectoryAtPath:kRoots[r] error:NULL]) {
+            NSString *container = [kRoots[r] stringByAppendingPathComponent:uuid];
+            NSString *metadata = [container stringByAppendingPathComponent:
+                                  @".com.apple.mobile_container_manager.metadata.plist"];
+            NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:metadata];
+            if (![dict[@"MCMMetadataIdentifier"] isEqualToString:@"com.apple.PosterBoard"]) {
+                continue;
+            }
+            NSString *support = [container stringByAppendingPathComponent:@"Library/Application Support"];
+            for (NSString *item in [fm contentsOfDirectoryAtPath:support error:NULL]) {
+                if ([item containsString:@"PRBPosterExtensionDataStore"]) {
+                    return [support stringByAppendingPathComponent:item];
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+/// 递归打印目录树：带文件大小，每个目录最多列 15 项，避免 assets 刷屏
+static void TXProbeDumpTree(NSString *path, NSUInteger depth, NSUInteger maxDepth, NSUInteger *budget) {
+    if (*budget == 0) {
+        return;
+    }
+    NSString *indent = [@"" stringByPaddingToLength:depth * 2 + 4 withString:@" " startingAtIndex:0];
+    BOOL isDir = TXProbeIsDir(path);
+    if (isDir) {
+        TXLog(@"%@%@/", indent, path.lastPathComponent);
+    } else {
+        NSDictionary *attrs = [NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
+        TXLog(@"%@%@ (%llu B)", indent, path.lastPathComponent,
+              [attrs[NSFileSize] unsignedLongLongValue]);
+    }
+    (*budget)--;
+
+    if (!isDir || depth >= maxDepth || *budget == 0) {
+        return;
+    }
+    NSArray<NSString *> *items =
+        [[NSFileManager.defaultManager contentsOfDirectoryAtPath:path error:NULL]
+         sortedArrayUsingSelector:@selector(compare:)];
+    NSUInteger shown = 0;
+    for (NSString *item in items) {
+        if (shown >= 15) {
+            TXLog(@"%@  …(还有 %lu 项)", indent, (unsigned long)(items.count - shown));
+            (*budget)--;
+            break;
+        }
+        TXProbeDumpTree([path stringByAppendingPathComponent:item], depth + 1, maxDepth, budget);
+        shown++;
+        if (*budget == 0) {
+            return;
+        }
+    }
+}
+
+void TXProbeDescriptorTemplate(void) {
+    TXLog(@"---- descriptor 结构探测开始（route A 复刻模板）----");
+
+    NSString *store = TXProbeFindPosterStore();
+    if (!store) {
+        TXLog(@"  未找到 PRBPosterExtensionDataStore");
+        return;
+    }
+
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSUInteger budget = 400;
+
+    for (NSString *version in [fm contentsOfDirectoryAtPath:store error:NULL]) {
+        NSString *versionPath = [store stringByAppendingPathComponent:version];
+        if (!TXProbeIsDir(versionPath)) {
+            continue;
+        }
+        NSString *extDir = [versionPath stringByAppendingPathComponent:
+                            @"Extensions/com.apple.WallpaperKit.CollectionsPoster"];
+        if (!TXProbeIsDir(extDir)) {
+            TXLog(@"  [无] 结构版本 %@ 下没有 CollectionsPoster", version);
+            continue;
+        }
+
+        TXLog(@"  [模板] 结构版本 %@ / CollectionsPoster", version);
+        TXLog(@"    扩展目录自身条目（找 descriptor 索引/清单文件）:");
+        for (NSString *item in [fm contentsOfDirectoryAtPath:extDir error:NULL]) {
+            NSString *full = [extDir stringByAppendingPathComponent:item];
+            TXLog(@"      %@%@  %@", item, TXProbeIsDir(full) ? @"/" : @"", TXProbeAttributes(full));
+            if (--budget == 0) {
+                return;
+            }
+        }
+
+        NSString *descriptors = [extDir stringByAppendingPathComponent:@"descriptors"];
+        NSArray<NSString *> *uuids = [fm contentsOfDirectoryAtPath:descriptors error:NULL];
+        TXLog(@"    descriptors 共 %lu 个，取第一个当模板:", (unsigned long)uuids.count);
+        NSString *sample = uuids.firstObject;
+        if (sample) {
+            TXLog(@"    样本 UUID: %@", sample);
+            TXProbeDumpTree([descriptors stringByAppendingPathComponent:sample], 0, 7, &budget);
+        }
+
+        TXLog(@"---- descriptor 结构探测结束（剩余额度 %lu）----", (unsigned long)budget);
+        return;
+    }
+
+    TXLog(@"---- descriptor 结构探测结束：没有可用的 CollectionsPoster 模板 ----");
 }

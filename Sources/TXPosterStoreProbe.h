@@ -12,3 +12,10 @@
 #import <Foundation/Foundation.h>
 
 FOUNDATION_EXPORT void TXProbePosterStore(void);
+
+/// 把「现成一个 CollectionsPoster descriptor 的完整结构」打进日志。
+///
+/// 用途：route A（像 Nugget 那样把 .tendies 里的 descriptors/<UUID> 装进系统存储，
+/// 由 PosterBoard 原生渲染）需要知道 descriptor 目录里到底有哪些文件。
+/// 直接照着系统已有的 5 条 CollectionsPoster 之一复刻即可，不用猜。
+FOUNDATION_EXPORT void TXProbeDescriptorTemplate(void);
