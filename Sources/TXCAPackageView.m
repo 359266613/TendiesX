@@ -3,9 +3,16 @@
 #import "TXLogger.h"
 #import <QuartzCore/QuartzCore.h>
 
+//  实现依据：Reference/Private/BSUICAPackageView.h（iOS 16.5 dump 逐条核对）
+//
+//  ★ 之前这里写的是「先建 CAPackage 再 setPackage:」，两处都是错的：
+//    1) BSUICAPackageView 里没有 setPackage: 这个方法；
+//    2) CAPackage 里也没有 initWithContentsOfURL:publishedObjectViewClassMap:。
+//    真实做法：BSUICAPackageView 自己持有 _rootLayer 和 _stateController，
+//    只要把 .ca 目录的 URL 交给 -initWithURL: 即可，states / 动画由它内部驱动。
+
 @implementation TXCAPackageView {
-    UIView *_packageView;   // BSUICAPackageView 实例
-    CALayer *_rootLayer;    // 兜底：直接把 CAPackage 的 rootLayer 贴上来
+    BSUICAPackageView *_packageView;
 }
 
 - (instancetype)initWithCAPackagePath:(NSString *)path {
@@ -21,7 +28,7 @@
 }
 
 - (BOOL)loaded {
-    return _packageView != nil || _rootLayer != nil;
+    return _packageView != nil;
 }
 
 #pragma mark - 加载
@@ -31,49 +38,47 @@
         return;
     }
 
-    Class packageClass = NSClassFromString(@"CAPackage");
-    if (!packageClass) {
-        TXLog(@"CAPackage 类不存在，无法渲染 .ca: %@", path.lastPathComponent);
+    NSFileManager *fm = NSFileManager.defaultManager;
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir] || !isDir) {
+        TXLog(@"CA 包路径不是目录: %@", path);
+        return;
+    }
+    // .ca 包必须带 main.caml（CAAML 图层树），没有就不是 CA 包
+    if (![fm fileExistsAtPath:[path stringByAppendingPathComponent:@"main.caml"]]) {
+        TXLog(@"CA 包缺少 main.caml，跳过: %@", path.lastPathComponent);
         return;
     }
 
-    // 用 Zone 抓到的那个初始化器：initWithContentsOfURL:publishedObjectViewClassMap:
-    SEL initializer = NSSelectorFromString(@"initWithContentsOfURL:publishedObjectViewClassMap:");
-    if (![packageClass instancesRespondToSelector:initializer]) {
-        TXLog(@"CAPackage 不支持 initWithContentsOfURL:publishedObjectViewClassMap:，无法渲染 .ca");
+    Class viewClass = NSClassFromString(@"BSUICAPackageView");
+    if (!viewClass) {
+        TXLog(@"本系统没有 BSUICAPackageView，无法渲染 .ca: %@", path.lastPathComponent);
+        return;
+    }
+    if (![viewClass instancesRespondToSelector:NSSelectorFromString(@"initWithURL:")]) {
+        TXLog(@"BSUICAPackageView 不支持 initWithURL:，无法渲染 .ca");
         return;
     }
 
-    id<TXCAPackage> package = [(id<TXCAPackage>)packageClass initWithContentsOfURL:[NSURL fileURLWithPath:path]
-                                                        publishedObjectViewClassMap:@{}];
-    if (!package) {
-        TXLog(@"CAPackage 加载失败: %@", path.lastPathComponent);
+    BSUICAPackageView *view = [(BSUICAPackageView *)[viewClass alloc] initWithURL:[NSURL fileURLWithPath:path]];
+    if (!view) {
+        TXLog(@"BSUICAPackageView 加载失败: %@", path.lastPathComponent);
         return;
     }
 
-    CALayer *rootLayer = [package respondsToSelector:@selector(rootLayer)] ? package.rootLayer : nil;
+    view.frame = self.bounds;
+    view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    view.userInteractionEnabled = NO;
+    [self addSubview:view];
+    _packageView = view;
+    _loadMode = @"BSUICAPackageView";
 
-    // 首选系统自己的 CA 包视图（SpringBoard 渲染 .ca 就用它，states/动画都由它驱动）
-    Class packageViewClass = NSClassFromString(@"BSUICAPackageView");
-    if (packageViewClass) {
-        BSUICAPackageView *view = [(BSUICAPackageView *)[packageViewClass alloc] initWithFrame:self.bounds];
-        view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        view.userInteractionEnabled = NO;
-        [view setPackage:package];
-        [self addSubview:view];
-        _packageView = view;
-        _loadMode = @"BSUICAPackageView";
-    } else if (rootLayer) {
-        // 兜底：直接挂 rootLayer（没有 states 驱动，部分素材可能停在初始态）
-        rootLayer.frame = self.bounds;
-        [self.layer addSublayer:rootLayer];
-        _rootLayer = rootLayer;
-        _loadMode = @"rootLayer";
-    }
-
-    TXLog(@"CAPackage 加载成功: %@ mode=%@ rootLayer=%@ 子层=%lu",
-          path.lastPathComponent, _loadMode, rootLayer ? @"有" : @"无",
-          (unsigned long)rootLayer.sublayers.count);
+    // publishedObjectNames 是包里可被外部引用的对象名，出问题时靠它判断包有没有真的读进来
+    NSArray *names = view.publishedObjectNames;
+    TXLog(@"CA 包加载成功: %@ 自然尺寸=%@ 发布对象=%@",
+          path.lastPathComponent,
+          NSStringFromCGSize([view sizeThatFits:CGSizeMake(CGFLOAT_MAX, CGFLOAT_MAX)]),
+          names.count ? [names componentsJoinedByString:@","] : @"(无)");
 }
 
 #pragma mark - 布局
@@ -81,12 +86,6 @@
 - (void)layoutSubviews {
     [super layoutSubviews];
     _packageView.frame = self.bounds;
-    if (_rootLayer) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        _rootLayer.frame = self.bounds;
-        [CATransaction commit];
-    }
 }
 
 @end

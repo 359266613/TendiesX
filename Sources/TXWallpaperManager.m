@@ -19,11 +19,18 @@ static NSString *TXShortPath(NSString *path) {
 /// iOS 16 上壁纸视图的 contentView 经常是「副本」（fake blur / snapshot replica /
 /// portal replica），只在过渡瞬间被合成，落定后就被系统快照取代。
 /// 挂进这些宿主就会表现为「下拉通知中心看得到、松手就消失」。
+///
+/// 三个类名来自 Reference/Private/ 的 dump（PaperBoardUI，iOS 16.5），精确匹配：
+///   PBUIFakeBlurView.h / PBUISnapshotReplicaView.h / PBUIPortalReplicaEffectView.h
+static BOOL TXIsClass(UIView *view, NSString *className) {
+    Class cls = NSClassFromString(className);
+    return cls && [view isKindOfClass:cls];
+}
+
 static BOOL TXIsReplicaHost(UIView *view) {
-    NSString *name = NSStringFromClass(view.class);
-    return [name containsString:@"FakeBlur"]
-        || [name containsString:@"SnapshotReplica"]
-        || [name containsString:@"PortalReplica"];
+    return TXIsClass(view, @"PBUIFakeBlurView")
+        || TXIsClass(view, @"PBUISnapshotReplicaView")
+        || TXIsClass(view, @"PBUIPortalReplicaEffectView");
 }
 
 // 壁纸视图会被系统反复重建，每次 didMoveToWindow 都可能新建渲染层。

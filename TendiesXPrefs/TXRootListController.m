@@ -42,6 +42,19 @@ static void TXAssignSpecifiers(PSListController *controller, NSArray *specifiers
     }
 }
 
+/// cell 类型不写死数字：dump 确认 PSTableCell 有 +cellTypeFromString:，
+/// 由它把 "PSSwitchCell" 这类字符串转成当前系统使用的数字；取不到才退回兜底值。
+static long long TXCellType(NSString *name, long long fallback) {
+    Class cls = NSClassFromString(@"PSTableCell");
+    if ([cls respondsToSelector:@selector(cellTypeFromString:)]) {
+        long long type = [cls cellTypeFromString:name];
+        if (type > 0) {
+            return type;
+        }
+    }
+    return fallback;
+}
+
 #pragma mark - 偏好读写
 
 static id TXPrefGet(NSString *key) {
@@ -143,7 +156,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
         if (TXPendingImportCount()) {
             [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"检测到未导入的 .tendies，请回上一页导入"
                                                            target:nil set:nil get:nil detail:nil
-                                                             cell:TXCellStaticText edit:nil]];
+                                                             cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
         }
 
         for (NSString *path in packages) {
@@ -153,7 +166,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
             PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:
                                  [NSString stringWithFormat:@"%@%@", selected ? @"✓ " : @"", TXDisplayName(path)]
                                                               target:nil set:nil get:nil detail:nil
-                                                                cell:TXCellTitle edit:nil];
+                                                                cell:TXCellType(@"PSTitleValueCell", TXCellTitle) edit:nil];
             [specs addObject:spec];
             [paths addObject:path];
         }
@@ -164,7 +177,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
                                  [NSString stringWithFormat:@"%@%@",
                                   (!current.length ? @"✓ " : @""), kTXAutoTitle]
                                                               target:nil set:nil get:nil detail:nil
-                                                                cell:TXCellTitle edit:nil];
+                                                                cell:TXCellType(@"PSTitleValueCell", TXCellTitle) edit:nil];
         [specs addObject:autoSpec];
 
         gTXPackagePaths = [paths copy];
@@ -258,7 +271,7 @@ static NSArray *gTXRootSpecifiers = nil;
                                 current.length ? TXDisplayName(current) : @"自动"]
                                                              target:nil set:nil get:nil
                                                            detail:[TXPackageListController class]
-                                                             cell:TXCellLink edit:nil];
+                                                             cell:TXCellType(@"PSLinkCell", TXCellLink) edit:nil];
         [specs addObject:picker];
 
         #pragma mark 导入素材
@@ -267,16 +280,16 @@ static NSArray *gTXRootSpecifiers = nil;
         [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"解压后是 /var/mobile/Library/TendiesX/名字.tendies/（同名目录），不留压缩包"
                                                        target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellStaticText edit:nil]];
+                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"也可以直接用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/ 再点重新扫描"
                                                        target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellStaticText edit:nil]];
+                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
 
         #pragma mark 说明
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"说明"]];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"运行日志：/var/mobile/Library/Logs/TendiesX.log"
                                                        target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellStaticText edit:nil]];
+                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
 
         #pragma mark 关于我们（固定：所有插件一致）
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"关于我们"]];
@@ -297,7 +310,7 @@ static NSArray *gTXRootSpecifiers = nil;
                                                           set:@selector(tx_setSwitchValue:specifier:)
                                                           get:@selector(tx_getSwitchValue:)
                                                        detail:nil
-                                                         cell:TXCellSwitch
+                                                         cell:TXCellType(@"PSSwitchCell", TXCellSwitch)
                                                          edit:nil];
     [spec setProperty:key forKey:@"key"];
     [specs addObject:spec];
@@ -306,7 +319,7 @@ static NSArray *gTXRootSpecifiers = nil;
 
 - (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs {
     PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:name target:self set:nil get:nil
-                                                       detail:nil cell:TXCellButton edit:nil];
+                                                       detail:nil cell:TXCellType(@"PSButtonCell", TXCellButton) edit:nil];
     [spec setButtonAction:action];
     [specs addObject:spec];
 }

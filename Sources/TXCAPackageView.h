@@ -18,7 +18,7 @@
 /// 是否成功加载
 @property (nonatomic, readonly) BOOL loaded;
 
-/// 加载方式："BSUICAPackageView" / "rootLayer" / "failed"
+/// 加载方式："BSUICAPackageView"（成功）/ "failed"（失败，调用方应退回静态兜底）
 @property (nonatomic, readonly, copy) NSString *loadMode;
 
 @end

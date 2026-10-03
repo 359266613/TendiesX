@@ -78,23 +78,27 @@
 //  每个 .ca 目录整体就是一个 CoreAnimation 包（main.caml = CAAML 图层树 + assets/*.png|jpg），
 //  系统自带加载/渲染能力，不需要我们自己解析 main.caml。
 //
-//  CAPackage（QuartzCore）用协议声明而不是 @interface，避免与 SDK 头重复定义冲突。
-//  真实类通过 NSClassFromString(@"CAPackage") 取，走运行时。
-@protocol TXCAPackage <NSObject>
-- (id)initWithContentsOfURL:(NSURL *)url
-  publishedObjectViewClassMap:(NSDictionary *)map;
-- (id)publishedObjectWithName:(NSString *)name;
-- (CALayer *)rootLayer;
-@end
-
-/// BaseBoardUI 里的 CA 包视图 —— SpringBoard 自己渲染 .ca 用的就是它
+//  对照 Reference/Private/BSUICAPackageView.h（iOS 16.5 dump）逐条核对：
+//  ★ 这个类**没有 setPackage:**，它自己拿 URL 内部建 CAPackage + CAStateController
+//    （ivar 里就是 _rootLayer / _stateController），所以唯一正确入口是 -initWithURL:。
 @interface BSUICAPackageView : UIView
-- (void)setPackage:(id)package;
-- (void)setState:(NSString *)state;
-- (void)setState:(NSString *)state animated:(BOOL)animated;
-- (void)setState:(NSString *)state ofLayer:(CALayer *)layer transitionSpeed:(double)speed;
-- (void)setStateController:(id)controller;
-- (void)setStatesData:(id)statesData;
+- (id)initWithURL:(NSURL *)url;
+- (id)initWithPackageName:(NSString *)name inBundle:(NSBundle *)bundle;
+@property (nonatomic, readonly, copy) NSArray *publishedObjectNames;
+- (id)publishedObjectWithName:(NSString *)name;
+- (BOOL)setState:(NSString *)state;
+- (BOOL)setState:(NSString *)state animated:(BOOL)animated;
+- (BOOL)setState:(NSString *)state
+        animated:(BOOL)animated
+ transitionSpeed:(double)speed
+      completion:(void (^)(void))completion;
+- (BOOL)setState:(NSString *)state
+         onLayer:(CALayer *)layer
+        animated:(BOOL)animated
+ transitionSpeed:(double)speed
+      completion:(void (^)(void))completion;
+- (CGSize)sizeThatFits:(CGSize)size;
+- (void)setStateControllerDelegate:(id)delegate;
 @end
 
 #endif /* TXWallpaper_h */
