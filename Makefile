@@ -20,6 +20,9 @@ TendiesX_CFLAGS = -fobjc-arc \
 	-Wno-unused-variable
 TendiesX_FRAMEWORKS = Foundation UIKit QuartzCore CoreVideo CoreMotion CoreImage ImageIO Metal MetalKit AVFoundation
 TendiesX_LIBRARIES = z
+# 私有类（PBUIWallpaperView 等）不在 SDK stub 里：用动态查找，
+# 否则 `SomePrivateClass.class` 会在链接期产生 _OBJC_CLASS_$_xxx 未定义符号
+TendiesX_LDFLAGS = -undefined dynamic_lookup
 
 # ---------- 设置面板（单 deb 双产物：tweak.mk + bundle.mk） ----------
 BUNDLE_NAME = TendiesXPrefs

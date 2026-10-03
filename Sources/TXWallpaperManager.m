@@ -83,7 +83,7 @@ static void TXDumpHierarchyOnce(UIView *view) {
     }
     [dumped addObject:key];
 
-    UIView *content = [view isKindOfClass:PBUIWallpaperView.class]
+    UIView *content = TXIsClass(view, @"PBUIWallpaperView")
         ? [(PBUIWallpaperView *)view contentView] : nil;
     UIView *parent = view.superview;
     TXLog(@"层级 %@: contentView=%@", key,
@@ -383,7 +383,7 @@ static void TXDumpHierarchyOnce(UIView *view) {
 
     // 宿主选择：容器本身直接用；壁纸视图则挂进它的 contentView
     UIView *host = view;
-    if ([view isKindOfClass:PBUIWallpaperView.class]) {
+    if (TXIsClass(view, @"PBUIWallpaperView")) {
         UIView *content = [(PBUIWallpaperView *)view contentView];
         if (content) {
             host = content;
