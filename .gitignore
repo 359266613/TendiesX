@@ -28,3 +28,6 @@ TendiesX.log*
 
 # 参考插件解包产物（逆向分析用，不进仓库）
 Reference/iosdump/
+
+# 参考素材解包产物（几十 MB，不进仓库；结构报告 tendies-structures.txt 会提交）
+Reference/tx-*/

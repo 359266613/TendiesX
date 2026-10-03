@@ -15,6 +15,7 @@
 
 #import "TXPreferencesUI.h"
 #import "TXLogger.h"
+#import "TXPosterInstaller.h"
 #import <objc/runtime.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -240,6 +241,8 @@ static NSArray *gTXRootSpecifiers = nil;
 - (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs;
 - (void)tx_pickFiles:(PSSpecifier *)specifier;
 - (void)tx_rescan:(PSSpecifier *)specifier;
+- (void)tx_installPoster:(PSSpecifier *)specifier;
+- (void)tx_alertMessage:(NSString *)message;
 - (void)tx_refreshAfterImport;
 @end
 
@@ -280,6 +283,11 @@ static NSArray *gTXRootSpecifiers = nil;
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"导入素材"]];
         [self tx_buttonNamed:@"从「文件」App 选择 .tendies" action:@selector(tx_pickFiles:) to:specs];
         [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
+        // route A：装进系统海报库，由 PosterBoard 原生渲染（锁屏/主屏/AOD 全由系统负责）
+        [self tx_buttonNamed:@"安装到系统海报库（推荐）" action:@selector(tx_installPoster:) to:specs];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它"
+                                                       target:nil set:nil get:nil detail:nil
+                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
         [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"解压后是 /var/mobile/Library/TendiesX/名字.tendies/（同名目录），不留压缩包"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
@@ -348,6 +356,44 @@ static NSArray *gTXRootSpecifiers = nil;
 // 按钮 cell 的 action 通常带 specifier 参数，这里兜无参版本（不同系统版本行为不一致）
 - (void)tx_rescan    { [self tx_rescan:nil]; }
 - (void)tx_pickFiles { [self tx_pickFiles:nil]; }
+
+#pragma mark - route A：安装进系统海报库
+
+- (void)tx_alertMessage:(NSString *)message {
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"TendiesX"
+                                            message:message
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"好"
+                                              style:UIAlertActionStyleDefault
+                                            handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+// 把当前选中 .tendies 的 descriptor 写进 PosterBoard 的海报存储。
+// 之后渲染完全由系统负责：不会卡（不在我们进程里画），也不会"松手就消失"。
+- (void)tx_installPoster:(PSSpecifier *)specifier {
+    NSString *path = TXPrefGet(@"ActivePackagePath");
+    if (!path.length) {
+        [self tx_alertMessage:@"先在「壁纸」里选一个已导入的 .tendies"];
+        return;
+    }
+    TXLog(@"面板: 开始安装到系统海报库: %@", path);
+
+    NSArray<NSString *> *installed =
+        [TXPosterInstaller.sharedInstaller installPackageAtPath:path];
+
+    if (installed.count) {
+        [self tx_alertMessage:[NSString stringWithFormat:
+            @"已安装 %lu 个海报。\n\n下一步：设置 → 墙纸 → 添加新墙纸 → 收藏，"
+            @"选中它即可。锁屏/主屏动画全部由系统渲染。",
+            (unsigned long)installed.count]];
+    } else {
+        [self tx_alertMessage:@"安装失败。请看日志 /var/mobile/Library/Logs/TendiesX.log 里的 [A] 开头的行"];
+    }
+}
+
+- (void)tx_installPoster { [self tx_installPoster:nil]; }
 
 #pragma mark - 从「文件」App 导入
 

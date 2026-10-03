@@ -210,7 +210,7 @@ void TXProbePosterStore(void) {
 #pragma mark - descriptor 结构探测（route A 的复刻模板）
 
 /// 定位 <PosterBoard 容器>/Library/Application Support/PRBPosterExtensionDataStore
-static NSString *TXProbeFindPosterStore(void) {
+NSString *TXPosterStoreRoot(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     static NSString *const kRoots[] = {
         @"/var/mobile/Containers/Data/Application",
@@ -277,7 +277,7 @@ static void TXProbeDumpTree(NSString *path, NSUInteger depth, NSUInteger maxDept
 void TXProbeDescriptorTemplate(void) {
     TXLog(@"---- descriptor 结构探测开始（route A 复刻模板）----");
 
-    NSString *store = TXProbeFindPosterStore();
+    NSString *store = TXPosterStoreRoot();
     if (!store) {
         TXLog(@"  未找到 PRBPosterExtensionDataStore");
         return;

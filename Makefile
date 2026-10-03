@@ -26,7 +26,8 @@ TendiesX_LDFLAGS = -undefined dynamic_lookup
 
 # ---------- 设置面板（单 deb 双产物：tweak.mk + bundle.mk） ----------
 BUNDLE_NAME = TendiesXPrefs
-TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m
+TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m \
+	Sources/TXPosterInstaller.m Sources/TXPosterStoreProbe.m
 TendiesXPrefs_CFLAGS = -fobjc-arc \
 	-I./TendiesXPrefs \
 	-I./Sources \

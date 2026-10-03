@@ -11,6 +11,11 @@
 
 #import <Foundation/Foundation.h>
 
+/// PosterBoard 的海报存储根目录：
+///   <PosterBoard 容器>/Library/Application Support/PRBPosterExtensionDataStore
+/// 读不到返回 nil。（实测 owner=mobile mode=0777，SpringBoard/设置面板可直接写）
+FOUNDATION_EXPORT NSString *TXPosterStoreRoot(void);
+
 FOUNDATION_EXPORT void TXProbePosterStore(void);
 
 /// 把「现成一个 CollectionsPoster descriptor 的完整结构」打进日志。
