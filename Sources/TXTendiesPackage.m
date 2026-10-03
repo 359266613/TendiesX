@@ -1,4 +1,5 @@
 #import "TXTendiesPackage.h"
+#import "TXLogger.h"
 
 static NSString *const kTXVideoExtensions[] = { @"mp4", @"mov", @"m4v", nil };
 static NSString *const kTXDescriptorNames[] = { @"descriptor.plist", @"configuration.plist", @"Info.plist", nil };
@@ -35,11 +36,13 @@ static NSString *const kTXDescriptorNames[] = { @"descriptor.plist", @"configura
         BOOL isDir = NO;
         BOOL exists = [fm fileExistsAtPath:_path isDirectory:&isDir];
         if (!exists) {
+            TXLog(@"路径不存在: %@", _path);
             return nil;
         }
 
         if (isDir) {
             if (![self tx_loadFromDirectory:_path]) {
+                TXLog(@"目录解析失败（未在 contents/versions 下找到视频）: %@", _path);
                 return nil;
             }
         } else {
@@ -49,6 +52,7 @@ static NSString *const kTXDescriptorNames[] = { @"descriptor.plist", @"configura
             //   3) 这里目前先返回 nil，等解包能力接上
             NSString *unpacked = [self tx_unpackContainer:_path];
             if (!unpacked || ![self tx_loadFromDirectory:unpacked]) {
+                TXLog(@"容器解包失败: %@", _path);
                 return nil;
             }
         }
@@ -61,7 +65,7 @@ static NSString *const kTXDescriptorNames[] = { @"descriptor.plist", @"configura
 /// 解包入口（占位）。返回可用目录，失败返回 nil。
 - (NSString *)tx_unpackContainer:(NSString *)containerPath {
     // TODO: 接入 zip 解包实现后返回解包目录
-    NSLog(@"[TendiesX] 尚未接入 zip 解包，无法解析容器: %@", containerPath);
+    TXLog(@"尚未接入 zip 解包，无法解析容器: %@", containerPath);
     return nil;
 }
 
@@ -108,6 +112,10 @@ static NSString *const kTXDescriptorNames[] = { @"descriptor.plist", @"configura
     _displayName = [name isKindOfClass:NSString.class]
         ? name
         : [_path.lastPathComponent stringByDeletingPathExtension];
+
+    TXLog(@"解析成功: name=%@ video=%@ 描述文件字段=%lu contents=%@",
+          _displayName, _videoURL.path, (unsigned long)_descriptor.count,
+          contents ?: @"(直接在根目录)");
     return YES;
 }
 

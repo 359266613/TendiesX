@@ -1,6 +1,7 @@
 #import "TXWallpaperManager.h"
 #import "TXTendiesPackage.h"
 #import "TXPreferences.h"
+#import "TXLogger.h"
 #import <AVFoundation/AVFoundation.h>
 
 #pragma mark - 渲染层
@@ -32,6 +33,8 @@
         _playerLayer = [AVPlayerLayer playerLayerWithPlayer:_player];
         _playerLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
         [self.layer addSublayer:_playerLayer];
+
+        TXLog(@"渲染层创建: name=%@ video=%@", package.displayName, package.videoURL.path);
     }
     return self;
 }
@@ -41,7 +44,7 @@
     self.playerLayer.frame = self.bounds;
 }
 
-- (void)tx_start  { [self.player play]; }
+- (void)tx_start  { [self.player play];  }
 - (void)tx_pause  { [self.player pause]; }
 
 @end
@@ -79,6 +82,7 @@
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         shared = [[TXWallpaperManager alloc] init];
+        TXLog(@"管理器初始化，开始读取偏好与 .tendies");
         [shared reloadFromDisk];
     });
     return shared;
@@ -93,10 +97,19 @@
 }
 
 - (void)reloadFromDisk {
-    NSString *path = TXPreferences.sharedInstance.activePackagePath;
+    TXPreferences *prefs = TXPreferences.sharedInstance;
+    NSString *path = prefs.activePackagePath;
     self.activePackage = [TXTendiesPackage packageAtPath:path];
 
+    TXLog(@"重新加载: enabled=%d interaction=%d parallax=%d path=%@ -> %@",
+          prefs.enabled, prefs.interactionEnabled, prefs.parallaxEnabled,
+          path.length ? path : @"(空)",
+          self.activePackage ? self.activePackage.displayName : @"未解析出可用壁纸");
+
     NSArray<UIView *> *views = self.renderers.keyEnumerator.allObjects;
+    if (views.count) {
+        TXLog(@"重新挂载已存在的 %lu 个壁纸视图", (unsigned long)views.count);
+    }
     for (UIView *view in views) {
         [self attachToWallpaperView:view];
     }
@@ -112,7 +125,14 @@
     [self.renderers removeObjectForKey:view];
 
     TXPreferences *prefs = TXPreferences.sharedInstance;
-    if (!prefs.enabled || !self.activePackage) {
+    if (!prefs.enabled) {
+        TXLog(@"跳过挂载(%@): 总开关 Enabled=NO", NSStringFromClass(view.class));
+        return;
+    }
+    if (!self.activePackage) {
+        TXLog(@"跳过挂载(%@): 无可用 .tendies，ActivePackagePath=%@",
+              NSStringFromClass(view.class),
+              prefs.activePackagePath.length ? prefs.activePackagePath : @"(空)");
         return;
     }
 
@@ -131,7 +151,9 @@
         [renderer addSubview:interaction];
     }
 
-    NSLog(@"[TendiesX] mounted %@ -> %@", self.activePackage.displayName, NSStringFromClass(view.class));
+    TXLog(@"已挂载: %@ -> %@ (bounds=%@)",
+          self.activePackage.displayName, NSStringFromClass(view.class),
+          NSStringFromCGRect(view.bounds));
 }
 
 - (void)layoutWallpaperWithView:(UIView *)view {
@@ -157,8 +179,8 @@
 }
 
 - (void)setLockScreenActive:(BOOL)active {
+    TXLog(@"锁屏激活 = %d", active);
     // TODO: 锁屏激活时可降低帧率 / 暂停，避免与面容、息屏显示互相抢占
-    NSLog(@"[TendiesX] lock screen active = %d", active);
 }
 
 - (void)handleEvent:(UIEvent *)event {

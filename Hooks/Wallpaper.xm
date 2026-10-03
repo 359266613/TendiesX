@@ -7,6 +7,7 @@
 #import "TendiesX.h"
 #import "TXWallpaperManager.h"
 #import "TXPreferences.h"
+#import "TXLogger.h"
 #import <objc/runtime.h>
 
 #pragma mark - 1. 壁纸视图：挂载 / 布局 / 前后台生命周期
@@ -15,7 +16,10 @@
 
 - (void)didMoveToWindow {
     %orig;
-    [TXWallpaperManager.sharedManager attachToWallpaperView:self];
+    if (self.window) {
+        TXLog(@"hook: %@ -didMoveToWindow", NSStringFromClass(self.class));
+        [TXWallpaperManager.sharedManager attachToWallpaperView:self];
+    }
 }
 
 - (void)layoutSubviews {
@@ -25,11 +29,13 @@
 
 - (void)prepareToAppear {
     %orig;
+    TXLog(@"hook: %@ -prepareToAppear", NSStringFromClass(self.class));
     [TXWallpaperManager.sharedManager resumeWallpaperWithView:self];
 }
 
 - (void)prepareToDisappear {
     %orig;
+    TXLog(@"hook: %@ -prepareToDisappear", NSStringFromClass(self.class));
     [TXWallpaperManager.sharedManager pauseWallpaperWithView:self];
 }
 
@@ -41,11 +47,13 @@
 
 - (void)noteWallpapersDidUpdate {
     %orig;
+    TXLog(@"hook: PBUIWallpaperViewController -noteWallpapersDidUpdate");
     [TXWallpaperManager.sharedManager reloadFromDisk];
 }
 
 - (void)_handleWallpaperChangedForVariant:(long long)variant {
     %orig;
+    TXLog(@"hook: 壁纸变更 variant=%lld", variant);
     [TXWallpaperManager.sharedManager reloadFromDisk];
 }
 
@@ -81,6 +89,18 @@
 %end
 
 %ctor {
+    TXLog(@"======== TendiesX 已加载 ========");
+    TXLog(@"系统 %@ (%@) | 日志文件: %@",
+          UIDevice.currentDevice.systemVersion,
+          UIDevice.currentDevice.model,
+          TXLogFilePath() ?: @"(解析失败，只能看系统日志)");
+
     Class cls = objc_getClass("PBUIWallpaperView");
-    NSLog(@"[TendiesX] loaded, PBUIWallpaperView = %@", cls ? NSStringFromClass(cls) : @"(missing)");
+    TXLog(@"PBUIWallpaperView = %@", cls ? NSStringFromClass(cls) : @"(缺失)");
+    if (!cls) {
+        TXLog(@"警告: 本系统没有 PBUIWallpaperView，壁纸 hook 不会生效");
+    }
+
+    // 触发一次加载，把偏好和 .tendies 解析结果打进日志
+    [TXWallpaperManager.sharedManager reloadFromDisk];
 }

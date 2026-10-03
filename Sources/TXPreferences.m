@@ -1,4 +1,5 @@
 #import "TXPreferences.h"
+#import "TXLogger.h"
 
 static NSString *const kTXPrefsDomain = @"com.axs.tendiesx";
 static NSString *const kTXPrefsReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
@@ -20,6 +21,8 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
                                   const void *object,
                                   CFDictionaryRef userInfo) {
     [[TXPreferences sharedInstance] reload];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"TXPreferencesDidReload"
+                                                        object:nil];
 }
 
 @interface TXPreferences ()
@@ -54,6 +57,10 @@ static void TXPrefsReloadCallback(CFNotificationCenterRef center,
 
     id path = TXCopyPref(@"ActivePackagePath");
     self.activePackagePath = [path isKindOfClass:NSString.class] && [path length] > 0 ? path : nil;
+
+    TXLog(@"偏好读取 [%@]: Enabled=%d Interaction=%d Parallax=%d ActivePackagePath=%@",
+          kTXPrefsDomain, self.enabled, self.interactionEnabled, self.parallaxEnabled,
+          self.activePackagePath ?: @"(空)");
 }
 
 @end
