@@ -1,16 +1,21 @@
 //
 //  TXRootListController.m
-//  设置面板：写 com.axs.tendiesx 偏好，并广播 Darwin 通知让 SpringBoard 侧重载。
-//  扫描目录：/var/mobile/Library/TendiesX/ 与 /var/mobile/Media/TendiesX/
+//  设置面板：布局 / 文案 / 开关 / 按钮全部在 Resources/Root.plist 里（改文案不用重编）。
 //
-//  设计要点（踩过的坑，勿改回去）：
-//  1. 必须把 specifiers 写回 PSListController 的 _specifiers 实例变量，否则面板全白；
-//  2. 开关值同时实现「specifier 的 get/set 选择器」与控制器级
-//     readPreferenceValue: / setPreferenceValue:specifier: 两条路；
-//  3. 切换开关时**不要**重建 specifiers（会让正在处理的点击回弹，表现为开关自己关掉）；
-//  4. **不要用 PSListItemsController + set:/get:** —— 它在 prepareSpecifiersMetadata 里会
-//      拿到非字符串的选择器值并抛 unrecognized selector，直接把设置 App 干崩（已实测）。
-//      壁纸选择改为自建二级页 + 自己实现 didSelectRowAtIndexPath。
+//  这里只做四件事：
+//    1) 把 plist 里带 id 的按钮接到方法上（plist 的 action 只是给外部看的说明）；
+//    2) 刷新动态文案（"当前素材"那一行）；
+//    3) 实现按钮逻辑：安装 / 清理重复 / 选文件 / 重新扫描 / 关于我们；
+//    4) 二级页「选择素材」—— 它是扫目录得到的动态列表，只能留在代码里。
+//
+//  设计要点（都是踩过的坑，勿改回去）：
+//  1) **不要重写 -specifiers**：PSListController 会自动读 bundle 里的 Root.plist，
+//     重写反而容易把 _specifiers 写坏导致整页白屏；
+//  2) 开关值走控制器级 readPreferenceValue: / setPreferenceValue:specifier:
+//     （dump 确认声明在 PSViewController 上），所以 Root.plist 里只写 key、不写 defaults；
+//  3) 切换开关时不要重建 specifiers（会让正在处理的点击回弹，表现为开关自己关掉）；
+//  4) **不要用 PSListItemsController + set:/get:** —— 它在 prepareSpecifiersMetadata 里
+//     会拿到非字符串的选择器值并抛 unrecognized selector，直接把设置 App 干崩（已实测）。
 //
 
 #import "TXPreferencesUI.h"
@@ -20,12 +25,13 @@
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
-/// 与 Tweak 侧统一：只有一个根目录
-///   <根>/xxx.tendies     投放中的压缩包
-///   <根>/xxx.tendies/    解压后的素材目录（同名，但是目录）
+static NSString *const kTXInstallNotification = @"com.axs.tendiesx/InstallPoster";
+static NSString *const kTXCleanupNotification = @"com.axs.tendiesx/CleanupDuplicates";
+
+/// 素材根目录（与 Tweak 侧一致）：压缩包和已解包目录都放这里
 static NSString *const kTXBaseDir = @"/var/mobile/Library/TendiesX";
 
-#pragma mark - specifiers 写回（面板白屏的关键）
+#pragma mark - specifiers 写回（二级页动态列表要用）
 
 /// PSListController 的表数据源读的是它自己的 `_specifiers` 实例变量。
 /// 只 `return` 数组而不写回该 ivar 时，日志能看到 specifiers 已构建，但界面全白。
@@ -64,10 +70,6 @@ static void TXPrefSet(NSString *key, id value) {
                              (__bridge CFPropertyListRef)value,
                              (__bridge CFStringRef)kTXDomain);
     CFPreferencesAppSynchronize((__bridge CFStringRef)kTXDomain);
-
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                                         (__bridge CFStringRef)kTXReloadNotification,
-                                         NULL, NULL, YES);
 }
 
 static BOOL TXPrefBool(NSString *key, BOOL fallback) {
@@ -75,11 +77,16 @@ static BOOL TXPrefBool(NSString *key, BOOL fallback) {
     return [value respondsToSelector:@selector(boolValue)] ? [value boolValue] : fallback;
 }
 
-/// 只发重载通知，不写任何键（让 SpringBoard 侧的 Tweak 立刻重新读盘 + 导入素材）
+/// 广播 Darwin 通知，让 SpringBoard 侧 worker 重新读偏好
 static void TXNotifyReload(void) {
     CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
                                          (__bridge CFStringRef)kTXReloadNotification,
                                          NULL, NULL, YES);
+}
+
+static void TXNotify(NSString *name) {
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         (__bridge CFStringRef)name, NULL, NULL, YES);
 }
 
 #pragma mark - 扫描
@@ -90,7 +97,7 @@ static NSString *TXDisplayName(NSString *path) {
     return dash.location == NSNotFound ? name : [name substringToIndex:dash.location];
 }
 
-/// 素材目录里的全部 .tendies：压缩包和已解包目录都算（route A 安装时自动解包）
+/// 素材目录里的全部 .tendies：压缩包和已解包目录都算（安装时自动解包）
 static NSArray<NSString *> *TXScanPackages(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSString *> *found = [NSMutableArray array];
@@ -107,9 +114,7 @@ static NSArray<NSString *> *TXScanPackages(void) {
     return found;
 }
 
-// route A 没有单独的"导入"步骤：安装时自动解包，所以不再需要待导入计数
-
-#pragma mark - 壁纸列表（自建二级页）
+#pragma mark - 素材列表（二级页，动态）
 
 static NSArray *gTXPackageSpecifiers = nil;
 static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一一对应
@@ -121,7 +126,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
 - (NSArray *)specifiers {
     if (!gTXPackageSpecifiers) {
-        TXLog(@"面板: 开始构建壁纸列表");
+        TXLog(@"面板: 开始构建素材列表");
         NSMutableArray *specs = [NSMutableArray array];
         NSMutableArray<NSString *> *paths = [NSMutableArray array];
 
@@ -132,8 +137,8 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
         for (NSString *path in packages) {
             BOOL selected = [path isEqualToString:current];
-            // 用普通行 + 自己接管 didSelectRowAtIndexPath：
-            // 不依赖 PSButtonCell 的 buttonAction 内部行为，也不碰 PSListItemsController。
+            // 用普通行 + 自己接管 didSelectRowAtIndexPath：不依赖 PSButtonCell 的内部行为，
+            // 也绝不碰 PSListItemsController。
             PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:
                                  [NSString stringWithFormat:@"%@%@", selected ? @"✓ " : @"", TXDisplayName(path)]
                                                               target:nil set:nil get:nil detail:nil
@@ -150,7 +155,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
         gTXPackagePaths = [paths copy];
         gTXPackageSpecifiers = [specs copy];
-        TXLog(@"面板: 壁纸列表构建完成，%lu 个壁纸", (unsigned long)paths.count);
+        TXLog(@"面板: 素材列表构建完成，%lu 个", (unsigned long)paths.count);
     }
     TXAssignSpecifiers(self, gTXPackageSpecifiers);
     return gTXPackageSpecifiers;
@@ -168,7 +173,7 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
     [self reloadSpecifiers];
 }
 
-// 自己接管点击：section 0 的行按顺序对应 gTXPackagePaths，section 1 只有「自动」
+// 自己接管点击：section 0 的行按顺序对应 gTXPackagePaths
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
@@ -178,9 +183,10 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
     NSString *path = gTXPackagePaths[indexPath.row];
 
     TXPrefSet(@"SourcePath", path);
+    TXNotifyReload();
     TXLog(@"面板: SourcePath -> %@", path);
 
-    // 不自动返回：留在列表里把 ✓ 刷出来，用户能看到确实切过去了
+    // 不自动返回：留在列表里把 ✓ 刷出来，用户能看到确实选过去了
     gTXPackageSpecifiers = nil;
     gTXPackagePaths = nil;
     [self reloadSpecifiers];
@@ -188,129 +194,149 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 
 @end
 
-#pragma mark - 根页面
-
-static NSArray *gTXRootSpecifiers = nil;
+#pragma mark - 根页面（布局全部来自 Resources/Root.plist）
 
 @interface TXRootListController : PSListController <UIDocumentPickerDelegate>
 @end
 
 @interface TXRootListController ()
-- (PSSpecifier *)tx_switchNamed:(NSString *)name key:(NSString *)key to:(NSMutableArray *)specs;
-- (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs;
+- (void)tx_wireButtons;
+- (void)tx_refreshDynamicLabels;
+- (void)tx_installPoster:(PSSpecifier *)specifier;
+- (void)tx_cleanupDuplicates:(PSSpecifier *)specifier;
+- (void)tx_pollInstallResult:(NSUInteger)attempt;
 - (void)tx_pickFiles:(PSSpecifier *)specifier;
 - (void)tx_rescan:(PSSpecifier *)specifier;
-- (void)tx_installPoster:(PSSpecifier *)specifier;
-- (void)tx_pollInstallResult:(NSUInteger)attempt;
 - (void)tx_alertMessage:(NSString *)message;
 - (void)tx_refreshAfterImport;
+- (void)openSileoRepo:(id)sender;
+- (void)openTelegramChannel:(id)sender;
+- (void)openQQGroup:(id)sender;
 @end
+
+/// plist 里的按钮 id -> 本类的方法（plist 的 action 只是说明文字，这里才是真正的绑定）
+static NSDictionary<NSString *, NSString *> *TXButtonSelectors(void) {
+    static NSDictionary<NSString *, NSString *> *map;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        map = @{
+            @"install": @"tx_installPoster:",
+            @"cleanup": @"tx_cleanupDuplicates:",
+            @"pick":    @"tx_pickFiles:",
+            @"rescan":  @"tx_rescan:",
+            @"sileo":   @"openSileoRepo:",
+            @"tg":      @"openTelegramChannel:",
+            @"qq":      @"openQQGroup:",
+        };
+    });
+    return map;
+}
 
 @implementation TXRootListController
 
-/// 能打出来就说明 bundle 的二进制已被 Settings 加载，类可用
 + (void)load {
     TXLog(@"======== TendiesXPrefs bundle 已加载，TXRootListController 可用 ========");
 }
 
-#pragma mark - 规格构建
-
-- (NSArray *)specifiers {
-    if (!gTXRootSpecifiers) {
-        TXLog(@"面板: 开始构建根 specifiers");
-        NSMutableArray *specs = [NSMutableArray array];
-
-        #pragma mark 开关
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"开关"]];
-        [self tx_switchNamed:@"启用" key:@"Enabled" to:specs];
-        [self tx_switchNamed:@"安装后自动设为当前壁纸" key:@"AutoApply" to:specs];
-
-        #pragma mark 素材（二级页）
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"素材"]];
-        NSString *current = TXPrefGet(@"SourcePath");
-        PSSpecifier *picker = [PSSpecifier preferenceSpecifierNamed:
-                               [NSString stringWithFormat:@"选择素材（当前：%@）",
-                                current.length ? TXDisplayName(current) : @"无"]
-                                                             target:nil set:nil get:nil
-                                                           detail:[TXPackageListController class]
-                                                             cell:TXCellType(@"PSLinkCell", TXCellLink) edit:nil];
-        [specs addObject:picker];
-
-        #pragma mark 安装
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"安装到系统海报库"]];
-        [self tx_buttonNamed:@"安装选中的素材" action:@selector(tx_installPoster:) to:specs];
-        [self tx_buttonNamed:@"从「文件」App 选择 .tendies" action:@selector(tx_pickFiles:) to:specs];
-        [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"装完会自动设为当前壁纸；动画由系统渲染（关掉上面的开关则手动去「墙纸 → 添加新墙纸 → 收藏」选）"
-                                                       target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"素材目录：/var/mobile/Library/TendiesX/（也可用 Filza 直接丢 .tendies）"
-                                                       target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
-
-        #pragma mark 说明
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"说明"]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"运行日志：/var/mobile/Library/Logs/TendiesX.log"
-                                                       target:nil set:nil get:nil detail:nil
-                                                         cell:TXCellType(@"PSStaticTextCell", TXCellStaticText) edit:nil]];
-
-        #pragma mark 关于我们（固定：所有插件一致）
-        [specs addObject:[PSSpecifier groupSpecifierWithName:@"关于我们"]];
-        [self tx_buttonNamed:@"Sileo 越狱源" action:@selector(openSileoRepo:) to:specs];
-        [self tx_buttonNamed:@"TG分享频道"  action:@selector(openTelegramChannel:) to:specs];
-        [self tx_buttonNamed:@"QQ交流群组"  action:@selector(openQQGroup:) to:specs];
-
-        gTXRootSpecifiers = [specs copy];
-        TXLog(@"面板: 根 specifiers 构建完成，%lu 个", (unsigned long)gTXRootSpecifiers.count);
-    }
-    TXAssignSpecifiers(self, gTXRootSpecifiers);
-    return gTXRootSpecifiers;
-}
-
-- (PSSpecifier *)tx_switchNamed:(NSString *)name key:(NSString *)key to:(NSMutableArray *)specs {
-    PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:name
-                                                       target:self
-                                                          set:@selector(tx_setSwitchValue:specifier:)
-                                                          get:@selector(tx_getSwitchValue:)
-                                                       detail:nil
-                                                         cell:TXCellType(@"PSSwitchCell", TXCellSwitch)
-                                                         edit:nil];
-    [spec setProperty:key forKey:@"key"];
-    [specs addObject:spec];
-    return spec;
-}
-
-- (void)tx_buttonNamed:(NSString *)name action:(SEL)action to:(NSMutableArray *)specs {
-    PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:name target:self set:nil get:nil
-                                                       detail:nil cell:TXCellType(@"PSButtonCell", TXCellButton) edit:nil];
-    [spec setButtonAction:action];
-    [specs addObject:spec];
-}
-
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"TendiesX";
-    TXLog(@"面板: viewDidLoad");
+    // Root.plist 里的 detail 只是字符串，不产生类引用，链接器可能把二级页剔除；
+    // 这里显式引用一次保活，并确认它真的在。
+    Class detailClass = [TXPackageListController class];
+    (void)detailClass;
+    TXLog(@"面板: viewDidLoad（布局来自 Root.plist），二级页类=%@",
+          NSClassFromString(@"TXPackageListController") ? @"可用" : @"缺失");
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    gTXRootSpecifiers = nil;
-    [self reloadSpecifiers];
+    [self tx_wireButtons];
+    [self tx_refreshDynamicLabels];
+    gTXPackageSpecifiers = nil;   // 回到根页面时让二级页重新扫目录
+    gTXPackagePaths = nil;
 }
 
-// 重新扫描：通知 Tweak 重新读盘，稍后刷新列表
+/// 把 plist 里带 id 的按钮接到方法上
+- (void)tx_wireButtons {
+    NSDictionary<NSString *, NSString *> *map = TXButtonSelectors();
+    NSUInteger wired = 0;
+    for (PSSpecifier *spec in [self specifiers]) {
+        NSString *identifier = [spec propertyForKey:@"id"];
+        NSString *selectorName = identifier.length ? map[identifier] : nil;
+        if (!selectorName.length) {
+            continue;
+        }
+        [spec setTarget:self];
+        [spec setButtonAction:NSSelectorFromString(selectorName)];
+        wired++;
+    }
+    TXLog(@"面板: 按钮已绑定 %lu 个（共 %lu 行）",
+          (unsigned long)wired, (unsigned long)[[self specifiers] count]);
+}
+
+/// 刷新「当前素材」那一行（值是动态的，不能在 plist 里写死）
+- (void)tx_refreshDynamicLabels {
+    NSString *path = TXPrefGet(@"SourcePath");
+    NSString *text = path.length ? TXDisplayName(path) : @"(无)";
+    for (PSSpecifier *spec in [self specifiers]) {
+        if (![[spec propertyForKey:@"id"] isEqualToString:@"currentMaterial"]) {
+            continue;
+        }
+        [spec setProperty:[NSString stringWithFormat:@"当前素材：%@", text] forKey:@"label"];
+        [self reloadSpecifier:spec];
+        break;
+    }
+}
+
+#pragma mark - 安装
+
+// 真正的文件操作在 SpringBoard 侧完成（面板沙盒写不了别的 App 容器），
+// 这里只发通知，然后轮询 worker 写回的结果。
+- (void)tx_installPoster:(PSSpecifier *)specifier {
+    NSString *path = TXPrefGet(@"SourcePath");
+    if (!path.length) {
+        [self tx_alertMessage:@"先在「选择素材」里选一个 .tendies"];
+        return;
+    }
+    TXLog(@"面板: 请求安装 %@", path);
+
+    TXPrefSet(@"LastInstallMessage", @"");
+    TXNotify(kTXInstallNotification);
+    [self tx_pollInstallResult:0];
+}
+
+- (void)tx_cleanupDuplicates:(PSSpecifier *)specifier {
+    TXLog(@"面板: 请求清理重复壁纸");
+    TXPrefSet(@"LastInstallMessage", @"");
+    TXNotify(kTXCleanupNotification);
+    [self tx_pollInstallResult:0];
+}
+
+/// worker 侧是「解包 → 复制 → 重扫 → 建配置 → 设为当前壁纸」的异步链路，
+/// 所以轮询偏好里的结果：遇到"正在…"就再等一轮，最多 3 轮，避免弹出中间态。
+- (void)tx_pollInstallResult:(NSUInteger)attempt {
+    __weak TXRootListController *weakSelf = self;
+    NSTimeInterval delay = (attempt == 0) ? 6.0 : 7.0;
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSString *message = TXPrefGet(@"LastInstallMessage");
+        if ([message containsString:@"正在"] && attempt < 3) {
+            TXLog(@"面板: 仍在进行（第 %lu 次轮询）", (unsigned long)attempt + 1);
+            [weakSelf tx_pollInstallResult:attempt + 1];
+            return;
+        }
+        [weakSelf tx_alertMessage:[NSString stringWithFormat:
+            @"%@\n\n详情见日志 /var/mobile/Library/Logs/TendiesX.log",
+            message.length ? message : @"已发出请求，但没收到结果（看日志确认）"]];
+    });
+}
+
 - (void)tx_rescan:(PSSpecifier *)specifier {
     TXNotifyReload();
     TXLog(@"面板: 已请求重新扫描素材");
     [self tx_refreshAfterImport];
 }
-
-// 按钮 cell 的 action 通常带 specifier 参数，这里兜无参版本（不同系统版本行为不一致）
-- (void)tx_rescan    { [self tx_rescan:nil]; }
-- (void)tx_pickFiles { [self tx_pickFiles:nil]; }
-
-#pragma mark - route A：安装进系统海报库
 
 - (void)tx_alertMessage:(NSString *)message {
     UIAlertController *alert =
@@ -323,46 +349,16 @@ static NSArray *gTXRootSpecifiers = nil;
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-// 真正的文件操作在 SpringBoard 侧完成（面板沙盒写不了别的 App 容器），
-// 这里只发通知，然后回读 worker 写下的结果。之后渲染完全由系统负责：
-// 不会卡（不在我们进程里画），也不会"松手就消失"。
-- (void)tx_installPoster:(PSSpecifier *)specifier {
-    NSString *path = TXPrefGet(@"SourcePath");
-    if (!path.length) {
-        [self tx_alertMessage:@"先在「素材」里选一个 .tendies"];
-        return;
-    }
-    TXLog(@"面板: 请求安装 %@", path);
-
-    TXPrefSet(@"LastInstallMessage", @"");
-    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-                                         CFSTR("com.axs.tendiesx/InstallPoster"),
-                                         NULL, NULL, YES);
-
-    [self tx_pollInstallResult:0];
-}
-
-/// worker 侧是「解包 → 复制 → 重扫 → 建配置 → 设为当前壁纸」的异步链路，
-/// 所以轮询偏好里的结果：遇到"正在…"就再等一轮，最多 3 轮，避免弹出一个中间态。
-- (void)tx_pollInstallResult:(NSUInteger)attempt {
+- (void)tx_refreshAfterImport {
     __weak TXRootListController *weakSelf = self;
-    NSTimeInterval delay = (attempt == 0) ? 6.0 : 7.0;
-
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
-        NSString *message = TXPrefGet(@"LastInstallMessage");
-        if ([message containsString:@"正在"] && attempt < 3) {
-            TXLog(@"面板: 安装仍在进行（第 %lu 次轮询）", (unsigned long)attempt + 1);
-            [weakSelf tx_pollInstallResult:attempt + 1];
-            return;
-        }
-        [weakSelf tx_alertMessage:[NSString stringWithFormat:
-            @"%@\n\n详情见日志 /var/mobile/Library/Logs/TendiesX.log",
-            message.length ? message : @"已发出安装请求，但没收到结果（看日志确认）"]];
+        gTXPackageSpecifiers = nil;
+        gTXPackagePaths = nil;
+        [weakSelf reloadSpecifiers];
+        TXLog(@"面板: 列表已刷新");
     });
 }
-
-- (void)tx_installPoster { [self tx_installPoster:nil]; }
 
 #pragma mark - 从「文件」App 导入
 
@@ -414,39 +410,7 @@ static NSArray *gTXRootSpecifiers = nil;
     TXLog(@"面板: 取消选择文件");
 }
 
-// 导入 + 解压是在 SpringBoard 侧异步做的，等一会儿再刷新列表
-- (void)tx_refreshAfterImport {
-    __weak TXRootListController *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        gTXRootSpecifiers = nil;
-        gTXPackageSpecifiers = nil;
-        gTXPackagePaths = nil;
-        [weakSelf reloadSpecifiers];
-        TXLog(@"面板: 列表已刷新");
-    });
-}
-
-#pragma mark - 开关读写（get/set 选择器 + 控制器级读写，两条路都覆盖）
-
-- (id)tx_getSwitchValue:(PSSpecifier *)specifier {
-    NSString *key = [specifier propertyForKey:@"key"];
-    if (!key.length) {
-        return @NO;
-    }
-    return @(TXPrefBool(key, YES));
-}
-
-- (void)tx_setSwitchValue:(id)value specifier:(PSSpecifier *)specifier {
-    NSString *key = [specifier propertyForKey:@"key"];
-    if (!key.length) {
-        return;
-    }
-    TXPrefSet(key, value);
-    TXLog(@"面板: %@ -> %@", key, value);
-}
-
-#pragma mark - 控制器级读写（部分版本的 cell 走这两条）
+#pragma mark - 开关读写（plist 只写 key，具体读写走这里）
 
 - (id)readPreferenceValue:(PSSpecifier *)specifier {
     NSString *key = [specifier propertyForKey:@"key"];
@@ -457,7 +421,6 @@ static NSArray *gTXRootSpecifiers = nil;
     if (value) {
         return value;
     }
-    // 开关类没写过时默认开
     return [specifier propertyForKey:@"default"] ?: @YES;
 }
 
@@ -467,6 +430,23 @@ static NSArray *gTXRootSpecifiers = nil;
         return;
     }
     TXPrefSet(key, value);
+    TXNotifyReload();
+    TXLog(@"面板: %@ -> %@", key, value);
+}
+
+// 部分系统版本的 cell 会走 specifier 的 get/set 选择器，两条路都兜着
+- (id)tx_getSwitchValue:(PSSpecifier *)specifier {
+    NSString *key = [specifier propertyForKey:@"key"];
+    return key.length ? @(TXPrefBool(key, YES)) : @NO;
+}
+
+- (void)tx_setSwitchValue:(id)value specifier:(PSSpecifier *)specifier {
+    NSString *key = [specifier propertyForKey:@"key"];
+    if (!key.length) {
+        return;
+    }
+    TXPrefSet(key, value);
+    TXLog(@"面板: %@ -> %@", key, value);
 }
 
 #pragma mark - 关于我们（固定：scheme 优先 + 网页兜底）
@@ -484,25 +464,22 @@ static NSArray *gTXRootSpecifiers = nil;
     }
 }
 
-- (void)openSileoRepo {
+- (void)openSileoRepo:(id)sender {
     NSString *source = @"https://axs66.github.io/pro";
     NSString *encoded = [source stringByAddingPercentEncodingWithAllowedCharacters:
                          NSCharacterSet.URLQueryAllowedCharacterSet] ?: source;
     [self openURL:[NSURL URLWithString:[NSString stringWithFormat:@"sileo://source/%@", encoded]]
          fallback:[NSURL URLWithString:source]];
 }
-- (void)openSileoRepo:(id)_          { [self openSileoRepo]; }
 
-- (void)openTelegramChannel {
+- (void)openTelegramChannel:(id)sender {
     [self openURL:[NSURL URLWithString:@"tg://resolve?domain=wxfx8"]
          fallback:[NSURL URLWithString:@"https://t.me/wxfx8"]];
 }
-- (void)openTelegramChannel:(id)_    { [self openTelegramChannel]; }
 
-- (void)openQQGroup {
+- (void)openQQGroup:(id)sender {
     [self openURL:[NSURL URLWithString:@"mqqapi://card/show_pslcard?src_type=internal&version=1&card_type=group&uin=678055716"]
          fallback:nil];
 }
-- (void)openQQGroup:(id)_            { [self openQQGroup]; }
 
 @end

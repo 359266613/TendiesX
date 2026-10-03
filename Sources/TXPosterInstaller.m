@@ -384,4 +384,106 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
     return installed;
 }
 
+#pragma mark - 清理重复项
+
+/// descriptor 的「当前版本号」：取 versions/ 下最大的那个数字。
+/// PosterBoard 每次改写都会把它 +1；系统自带的是几千，我们装的是 0~4。
+static NSInteger TXMaxVersionIn(NSString *descriptorDir) {
+    NSInteger maximum = -1;
+    NSString *versions = [descriptorDir stringByAppendingPathComponent:@"versions"];
+    for (NSString *item in [NSFileManager.defaultManager contentsOfDirectoryAtPath:versions
+                                                                            error:NULL]) {
+        NSInteger value = item.integerValue;
+        if (value > maximum) {
+            maximum = value;
+        }
+    }
+    return maximum;
+}
+
+- (NSUInteger)cleanupDuplicateInstallsInExtension:(NSString *)extensionIdentifier {
+    if (!extensionIdentifier.length) {
+        return 0;
+    }
+    NSString *versionDir = [self.class storeVersionDir];
+    if (!versionDir) {
+        TXLog(@"[清理] 找不到海报存储，放弃");
+        return 0;
+    }
+    NSString *descriptorsRoot = [versionDir stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"Extensions/%@/descriptors", extensionIdentifier]];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    if (!TXIsDirectory(descriptorsRoot)) {
+        TXLog(@"[清理] 没有 descriptors 目录: %@", descriptorsRoot);
+        return 0;
+    }
+
+    // 按 identifier 分组
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *groups = [NSMutableDictionary dictionary];
+    for (NSString *entry in [fm contentsOfDirectoryAtPath:descriptorsRoot error:NULL]) {
+        if (TXIsJunkEntry(entry)) {
+            continue;
+        }
+        NSString *dir = [descriptorsRoot stringByAppendingPathComponent:entry];
+        if (!TXIsDirectory(dir)) {
+            continue;
+        }
+        NSString *identifier = TXDescriptorIdentifierIn(dir);
+        if (!identifier.length) {
+            continue;
+        }
+        NSMutableArray<NSDictionary *> *list = groups[identifier];
+        if (!list) {
+            list = [NSMutableArray array];
+            groups[identifier] = list;
+        }
+        [list addObject:@{ @"uuid": entry, @"version": @(TXMaxVersionIn(dir)) }];
+    }
+
+    NSUInteger removed = 0;
+    for (NSString *identifier in groups) {
+        NSMutableArray<NSDictionary *> *list = groups[identifier];
+        if (list.count < 2) {
+            continue;   // 只有一份（通常是系统自带的），不碰
+        }
+        [list sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [b[@"version"] compare:a[@"version"]];   // 版本高的排前面
+        }];
+        NSDictionary *keep = list.firstObject;
+        TXLog(@"[清理] identifier=%@ 有 %lu 份，保留 %@ (v%@)",
+              identifier, (unsigned long)list.count, keep[@"uuid"], keep[@"version"]);
+
+        for (NSUInteger i = 1; i < list.count; i++) {
+            NSDictionary *record = list[i];
+            NSString *uuid = record[@"uuid"];
+            NSInteger version = [record[@"version"] integerValue];
+            if (version >= 1000) {
+                TXLog(@"[清理] 跳过 %@（v%ld，看着像系统管理的，不动）", uuid, (long)version);
+                continue;
+            }
+            NSError *error = nil;
+            if ([fm removeItemAtPath:[descriptorsRoot stringByAppendingPathComponent:uuid]
+                               error:&error]) {
+                removed++;
+                TXLog(@"[清理] 已删除重复项 %@ (identifier=%@ v%ld)", uuid, identifier, (long)version);
+            } else {
+                TXLog(@"[清理] 删除失败 %@: %@", uuid, error.localizedDescription);
+            }
+        }
+    }
+
+    // 同步清理安装清单：只保留目录还在的记录
+    NSMutableArray<NSDictionary *> *survivors = [NSMutableArray array];
+    for (NSDictionary *record in TXInstalledManifest()) {
+        NSString *uuid = record[@"uuid"];
+        if (uuid.length && TXIsDirectory([descriptorsRoot stringByAppendingPathComponent:uuid])) {
+            [survivors addObject:record];
+        }
+    }
+    TXSaveInstalledManifest(survivors);
+
+    TXLog(@"[清理] 完成，共删除 %lu 个重复项", (unsigned long)removed);
+    return removed;
+}
+
 @end

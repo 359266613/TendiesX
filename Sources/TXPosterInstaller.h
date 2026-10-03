@@ -41,4 +41,11 @@
 /// 设备对应的结构版本目录（iOS 16 → 59，iOS 17+ → 61）；读不到返回 nil
 + (NSString *)storeVersionDir;
 
+/// 清理重复项：同一 identifier 只保留版本号最高的那一份（系统自带那份），
+/// 其余低版本副本删掉，并同步清理安装清单。
+/// 判定依据：PosterBoard 每次改写 descriptor 会把 versions/ 下的版本号 +1，
+/// 系统自带的都是几千（日志里是 3991），我们自己装的是 0~4 —— 所以 >=1000 的一律跳过。
+/// @return 实际删除的数量
+- (NSUInteger)cleanupDuplicateInstallsInExtension:(NSString *)extensionIdentifier;
+
 @end
