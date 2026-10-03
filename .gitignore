@@ -35,3 +35,7 @@ Reference/iosdump/
 
 # 参考素材解包产物（几十 MB，不进仓库；结构报告 tendies-structures.txt 会提交）
 Reference/tx-*/
+
+# 交流用的截图（根目录下的 1.jpg / 2.png 这类）
+/*.jpg
+/*.png
