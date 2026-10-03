@@ -19,18 +19,9 @@
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
-/// 素材库目录（导入后的解压结果，优先级最高）
-static NSString *const kTXLibraryDirs[] = {
-    @"/var/mobile/Library/TendiesX/Library",
-    @"/var/mobile/Media/TendiesX/Library",
-    nil
-};
-/// 投放目录（用 Filza 把 .tendies 丢这里，Tweak 侧会自动导入并删掉源文件）
-static NSString *const kTXInboxDirs[] = {
-    @"/var/mobile/Library/TendiesX",
-    @"/var/mobile/Media/TendiesX",
-    nil
-};
+/// 清理：与 Tweak 侧统一 —— 只有一个根目录，素材库是它的 Library 子目录
+static NSString *const kTXBaseDir    = @"/var/mobile/Library/TendiesX";
+static NSString *const kTXLibraryDir = @"/var/mobile/Library/TendiesX/Library";
 /// 「自动」选项对应的值（空串 = 让 Tweak 自动发现）
 static NSString *const kTXAutoValue = @"";
 static NSString *const kTXAutoTitle = @"自动（扫描到的第一个）";
@@ -87,40 +78,32 @@ static NSString *TXDisplayName(NSString *path) {
     return dash.location == NSNotFound ? name : [name substringToIndex:dash.location];
 }
 
-static NSArray<NSString *> *TXScanPackages(void) {
+/// 素材库里的每个子目录 = 一个可用壁纸
+static NSArray<NSString *> *TXScanLibrary(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSString *> *found = [NSMutableArray array];
 
-    // 1) 素材库：已解压的目录（不带 .tendies 后缀）
-    for (int i = 0; kTXLibraryDirs[i] != nil; i++) {
-        NSString *dir = kTXLibraryDirs[i];
-        NSMutableArray<NSString *> *inDir = [NSMutableArray array];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
-            NSString *full = [dir stringByAppendingPathComponent:item];
-            BOOL isDir = NO;
-            if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
-                [inDir addObject:full];
-            }
+    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXLibraryDir error:NULL]) {
+        NSString *full = [kTXLibraryDir stringByAppendingPathComponent:item];
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+            [found addObject:full];
         }
-        [inDir sortUsingSelector:@selector(compare:)];
-        [found addObjectsFromArray:inDir];
     }
 
-    // 2) 投放目录：还没被导入的 .tendies（点「导入 / 重新扫描素材」后会被解压并删除）
-    for (int i = 0; kTXInboxDirs[i] != nil; i++) {
-        NSString *dir = kTXInboxDirs[i];
-        NSMutableArray<NSString *> *inDir = [NSMutableArray array];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
-            if (![[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
-                continue;
-            }
-            [inDir addObject:[dir stringByAppendingPathComponent:item]];
-        }
-        [inDir sortUsingSelector:@selector(compare:)];
-        [found addObjectsFromArray:inDir];
-    }
-
+    [found sortUsingSelector:@selector(compare:)];
     return found;
+}
+
+/// 投放目录里还没导入的 .tendies 数量（只用于提示，不参与选择）
+static NSUInteger TXPendingImportCount(void) {
+    NSUInteger count = 0;
+    for (NSString *item in [NSFileManager.defaultManager contentsOfDirectoryAtPath:kTXBaseDir error:NULL]) {
+        if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+            count++;
+        }
+    }
+    return count;
 }
 
 #pragma mark - 壁纸列表（自建二级页）
@@ -140,9 +123,15 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
         NSMutableArray<NSString *> *paths = [NSMutableArray array];
 
         NSString *current = TXPrefGet(@"ActivePackagePath");
-        NSArray<NSString *> *packages = TXScanPackages();
+        NSArray<NSString *> *packages = TXScanLibrary();
 
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"点一下即可切换"]];
+
+        if (TXPendingImportCount()) {
+            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"检测到未导入的 .tendies，请回上一页点「导入 / 重新扫描素材」"
+                                                           target:nil set:nil get:nil detail:nil
+                                                             cell:TXCellStaticText edit:nil]];
+        }
 
         for (NSString *path in packages) {
             BOOL selected = [path isEqualToString:current];

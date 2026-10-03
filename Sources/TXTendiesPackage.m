@@ -7,34 +7,13 @@ NSString *const TXWallpaperKindCA      = @"ca";
 NSString *const TXWallpaperKindImage   = @"image";
 NSString *const TXWallpaperKindUnknown = @"unknown";
 
-static NSString *const kTXVideoExtensions[] = { @"mp4", @"mov", @"m4v", @"mkv", @"avi", nil };
-static NSString *const kTXImageExtensions[] = { @"png", @"jpg", @"jpeg", @"heic", nil };
+/// 唯一根目录：投放目录就是它本身，素材库是它的 Library 子目录
+static NSString *const kTXBaseDirectory = @"/var/mobile/Library/TendiesX";
 
-#pragma mark - 路径约定
+static NSString *const kTXVideoExtensions[] = { @"mp4", @"mov", @"m4v", nil };
+static NSString *const kTXImageExtensions[] = { @"png", @"jpg", @"jpeg", nil };
 
-/// 解包缓存根目录
-static NSString *TXTendiesCacheRoot(void) {
-    static NSString *root = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSFileManager *fm = NSFileManager.defaultManager;
-        NSArray<NSString *> *candidates = @[
-            @"/var/mobile/Library/Caches/TendiesX",
-            [NSTemporaryDirectory() stringByAppendingPathComponent:@"TendiesX"],
-        ];
-        for (NSString *dir in candidates) {
-            if (!dir.length) {
-                continue;
-            }
-            if ([fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL]
-                || [fm fileExistsAtPath:dir]) {
-                root = dir;
-                break;
-            }
-        }
-    });
-    return root;
-}
+#pragma mark - 小工具
 
 static BOOL TXExtensionInList(NSString *ext, NSString *const *list) {
     for (int i = 0; list[i] != nil; i++) {
@@ -49,26 +28,7 @@ static unsigned long long TXFileSize(NSString *path) {
     return [[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL] fileSize];
 }
 
-/// 静态兜底图优先级：路径含 background 的 > 体积最大的
-static NSString *TXChooseFallbackImage(NSArray<NSString *> *images) {
-    NSString *background = nil;
-    NSString *largest = nil;
-    unsigned long long largestSize = 0;
-
-    for (NSString *path in images) {
-        if (!background && [path.lowercaseString containsString:@"background"]) {
-            background = path;
-        }
-        unsigned long long size = TXFileSize(path);
-        if (size > largestSize) {
-            largestSize = size;
-            largest = path;
-        }
-    }
-    return background ?: largest;
-}
-
-/// 目录/文件名安全化（避免路径穿越与非法字符）
+/// 目录名安全化（避免路径穿越与非法字符）
 static NSString *TXSafeComponentName(NSString *component) {
     NSCharacterSet *illegal = [NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"];
     NSString *safe = [[component componentsSeparatedByCharactersInSet:illegal] componentsJoinedByString:@"_"];
@@ -76,31 +36,19 @@ static NSString *TXSafeComponentName(NSString *component) {
     return safe.length ? safe : @"package";
 }
 
-@interface TXTendiesPackage ()
-@property (nonatomic, copy,   readwrite) NSString *path;
-@property (nonatomic, copy,   readwrite) NSString *rootDirectory;
-@property (nonatomic, copy,   readwrite) NSString *displayName;
-@property (nonatomic, copy,   readwrite) NSString *kind;
-@property (nonatomic, copy,   readwrite) NSURL *videoURL;
-@property (nonatomic, copy,   readwrite) NSURL *fallbackImageURL;
-@property (nonatomic, copy,   readwrite) NSDictionary *descriptor;
-@property (nonatomic, copy,   readwrite) NSArray<NSString *> *caBundlePaths;
-@property (nonatomic, assign, readwrite) NSTimeInterval stillTime;
-@property (nonatomic, assign, readwrite) BOOL looping;
-@property (nonatomic, assign, readwrite) BOOL unpackedFromZip;
-@end
+/// 去掉分辨率尾巴，例如 7400.WWDC_2022-390w-844h@3x~iphone -> 7400.WWDC_2022
+static NSString *TXTrimmedName(NSString *name) {
+    NSRange range = [name rangeOfString:@"-\\d+w-\\d+h" options:NSRegularExpressionSearch];
+    return range.location == NSNotFound ? name : [name substringToIndex:range.location];
+}
 
-@implementation TXTendiesPackage
-
-#pragma mark - 目录约定
-
-/// 素材库目录：导入后的解压结果长期放这里（不再依赖 Caches，避免被系统清理）
-+ (NSString *)libraryDirectory {
+/// 素材库目录（失败时回落到临时目录）
+static NSString *TXLibraryDirectory(void) {
     static NSString *dir = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSFileManager *fm = NSFileManager.defaultManager;
-        NSString *candidate = [@"/var/mobile/Library/TendiesX" stringByAppendingPathComponent:@"Library"];
+        NSString *candidate = [kTXBaseDirectory stringByAppendingPathComponent:@"Library"];
         if ([fm createDirectoryAtPath:candidate withIntermediateDirectories:YES attributes:nil error:NULL]
             || [fm fileExistsAtPath:candidate]) {
             dir = candidate;
@@ -113,112 +61,76 @@ static NSString *TXSafeComponentName(NSString *component) {
     return dir;
 }
 
-/// 投放目录：用 Filza 把 .tendies 丢进来，重载时自动导入并删除源文件
-+ (NSArray<NSString *> *)inboxDirectories {
-    return @[ @"/var/mobile/Library/TendiesX", @"/var/mobile/Media/TendiesX" ];
-}
+@interface TXTendiesPackage ()
+@property (nonatomic, copy, readwrite) NSString *path;
+@property (nonatomic, copy, readwrite) NSString *displayName;
+@property (nonatomic, copy, readwrite) NSString *kind;
+@property (nonatomic, copy, readwrite) NSURL *videoURL;
+@property (nonatomic, copy, readwrite) NSURL *fallbackImageURL;
+@property (nonatomic, copy, readwrite) NSDictionary *descriptor;
+@property (nonatomic, copy, readwrite) NSArray<NSString *> *caBundlePaths;
+@end
 
-/// 扫描投放目录里的 .tendies：解压到素材库，成功后删除源文件。
-/// 返回 「源文件路径 -> 素材库目录」 的映射，便于把偏好里的路径改指过去。
+@implementation TXTendiesPackage
+
+#pragma mark - 目录与导入
+
++ (NSString *)libraryDirectory { return TXLibraryDirectory(); }
++ (NSString *)inboxDirectory   { return kTXBaseDirectory; }
+
 + (NSDictionary<NSString *, NSString *> *)importPendingPackagesWithSourceRemoval:(BOOL)removeSource {
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *library = [self libraryDirectory];
+    NSString *library = TXLibraryDirectory();
     NSMutableDictionary<NSString *, NSString *> *mapping = [NSMutableDictionary dictionary];
 
-    for (NSString *inbox in [self inboxDirectories]) {
-        for (NSString *item in [fm contentsOfDirectoryAtPath:inbox error:NULL]) {
-            if (![[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
-                continue;
-            }
-            NSString *source = [inbox stringByAppendingPathComponent:item];
-            NSString *name = TXSafeComponentName([item stringByDeletingPathExtension]);
-            NSString *destination = [library stringByAppendingPathComponent:name];
-            NSString *marker = [destination stringByAppendingPathComponent:@".unpacked"];
+    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXBaseDirectory error:NULL]) {
+        if (![[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+            continue;
+        }
 
-            if ([fm fileExistsAtPath:marker]) {
-                // 已导入过：源文件留着没用，直接删掉
-                if (removeSource) {
-                    [fm removeItemAtPath:source error:NULL];
-                }
-                mapping[source] = destination;
-                continue;
-            }
+        NSString *source = [kTXBaseDirectory stringByAppendingPathComponent:item];
+        NSString *destination = [library stringByAppendingPathComponent:
+                                 TXSafeComponentName(item.stringByDeletingPathExtension)];
+        NSString *marker = [destination stringByAppendingPathComponent:@".unpacked"];
 
-            TXLog(@"导入素材: %@ -> %@", item, destination);
+        // 已解压过就直接删源文件；没解压过才解
+        if (![fm fileExistsAtPath:marker]) {
+            TXLog(@"导入素材: %@", item);
             TXZipArchive *archive = [TXZipArchive archiveWithContentsOfFile:source];
-            if (!archive) {
-                TXLog(@"导入失败（不是合法 zip）: %@", item);
-                continue;
-            }
-
-            [fm removeItemAtPath:destination error:NULL];
             NSError *error = nil;
-            if (![archive extractToDirectory:destination error:&error]) {
-                TXLog(@"导入失败: %@", error.localizedDescription ?: @"未知错误");
+            if (!archive || ![archive extractToDirectory:destination error:&error]) {
+                TXLog(@"导入失败（保留源文件）: %@（%@）", item,
+                      error.localizedDescription ?: @"不是合法 zip");
                 continue;
             }
             [@"1" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-
-            if (removeSource) {
-                NSError *removeError = nil;
-                if ([fm removeItemAtPath:source error:&removeError]) {
-                    TXLog(@"已删除源文件: %@", item);
-                } else {
-                    TXLog(@"源文件删除失败: %@", removeError.localizedDescription);
-                }
-            }
-            mapping[source] = destination;
         }
+
+        if (removeSource) {
+            NSError *removeError = nil;
+            if (![fm removeItemAtPath:source error:&removeError]) {
+                TXLog(@"源文件删除失败: %@", removeError.localizedDescription);
+            }
+        }
+        mapping[source] = destination;
     }
     return mapping;
 }
 
-+ (NSArray<NSString *> *)searchDirectories {
-    NSMutableArray<NSString *> *dirs = [NSMutableArray array];
-
-    // 1) 素材库（已解压，优先级最高）
-    NSString *library = [self libraryDirectory];
-    if (library.length) {
-        [dirs addObject:library];
-    }
-    // 2) 投放目录（还没导入的 .tendies）
-    [dirs addObjectsFromArray:[self inboxDirectories]];
-    // 3) Media 侧素材库
-    [dirs addObject:@"/var/mobile/Media/TendiesX/Library"];
-    // 4) 旧版解包缓存（兼容）
-    NSString *cache = TXTendiesCacheRoot();
-    if (cache.length) {
-        [dirs addObject:cache];
-    }
-    return dirs;
-}
-
 + (NSArray<NSString *> *)availablePackagePaths {
     NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *library = TXLibraryDirectory();
     NSMutableArray<NSString *> *found = [NSMutableArray array];
 
-    // 调整：按 searchDirectories 的优先级逐目录收集，只在「同一目录内部」排序。
-    // 之前是整体排序，导致 /var/mobile/Library/Caches/TendiesX/...（解包缓存）
-    // 因为字母序排在 /var/mobile/Library/TendiesX/... 之前，永远抢到自动发现，
-    // 用户新放进素材目录的 .tendies 反而扫不到。
-    for (NSString *dir in [self searchDirectories]) {
-        NSMutableArray<NSString *> *inDirectory = [NSMutableArray array];
-        for (NSString *item in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
-            NSString *full = [dir stringByAppendingPathComponent:item];
-            BOOL isDir = NO;
-            if (![fm fileExistsAtPath:full isDirectory:&isDir]) {
-                continue;
-            }
-            BOOL isTendiesZip = [[item.pathExtension lowercaseString] isEqualToString:@"tendies"];
-            BOOL isUnpackedTendies = isDir && [fm fileExistsAtPath:[full stringByAppendingPathComponent:@"descriptors"]];
-            if (isTendiesZip || isUnpackedTendies) {
-                [inDirectory addObject:full];
-            }
+    for (NSString *item in [fm contentsOfDirectoryAtPath:library error:NULL]) {
+        NSString *full = [library stringByAppendingPathComponent:item];
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+            [found addObject:full];
         }
-        [inDirectory sortUsingSelector:@selector(compare:)];
-        [found addObjectsFromArray:inDirectory];
     }
 
+    [found sortUsingSelector:@selector(compare:)];
     return found;
 }
 
@@ -226,102 +138,31 @@ static NSString *TXSafeComponentName(NSString *component) {
     return [self availablePackagePaths].firstObject;
 }
 
-+ (BOOL)isTendiesURL:(NSURL *)url {
-    return [[url.pathExtension lowercaseString] isEqualToString:@"tendies"];
-}
-
-#pragma mark - 构造
-
 + (instancetype)packageAtPath:(NSString *)path {
     return path.length ? [[self alloc] initWithPath:path] : nil;
 }
+
+#pragma mark - 构造
 
 - (instancetype)initWithPath:(NSString *)path {
     self = [super init];
     if (self) {
         _path = [path copy];
-        _rootDirectory = [path copy];
         _kind = TXWallpaperKindUnknown;
-        _looping = YES;
-        _stillTime = 0.0;
         _descriptor = @{};
         _caBundlePaths = @[];
 
-        NSFileManager *fm = NSFileManager.defaultManager;
         BOOL isDir = NO;
-        if (![fm fileExistsAtPath:_path isDirectory:&isDir]) {
-            TXLog(@"路径不存在: %@", _path);
+        if (![NSFileManager.defaultManager fileExistsAtPath:_path isDirectory:&isDir] || !isDir) {
+            TXLog(@"不是有效的素材目录: %@", _path);
             return nil;
         }
-
-        if (!isDir) {
-            NSString *unpacked = [self tx_unpackContainer:_path];
-            if (!unpacked) {
-                return nil;
-            }
-            _rootDirectory = unpacked;
-            _unpackedFromZip = YES;
-        }
-
-        if (![self tx_scanDirectory:_rootDirectory]) {
-            TXLog(@"解析失败（递归扫描后没有任何可用资源）: %@", _rootDirectory);
+        if (![self tx_scanDirectory:_path]) {
+            TXLog(@"解析失败（目录里没有任何可用资源）: %@", _path);
             return nil;
         }
     }
     return self;
-}
-
-#pragma mark - 解包
-
-/// .tendies(zip) -> 素材库目录，返回可用目录；失败返回 nil
-- (NSString *)tx_unpackContainer:(NSString *)containerPath {
-    NSString *cacheRoot = [TXTendiesPackage libraryDirectory];
-    if (!cacheRoot.length) {
-        TXLog(@"找不到可写的素材库目录");
-        return nil;
-    }
-
-    NSString *name = TXSafeComponentName([[containerPath lastPathComponent] stringByDeletingPathExtension]);
-    NSString *destination = [cacheRoot stringByAppendingPathComponent:name];
-    NSFileManager *fm = NSFileManager.defaultManager;
-
-    // 源文件比上次解包新才重新解
-    NSString *marker = [destination stringByAppendingPathComponent:@".unpacked"];
-    NSDictionary *sourceAttributes = [fm attributesOfItemAtPath:containerPath error:NULL];
-    NSDictionary *markerAttributes = [fm attributesOfItemAtPath:marker error:NULL];
-    BOOL needsUnpack = YES;
-    if (sourceAttributes && markerAttributes) {
-        NSDate *sourceDate = sourceAttributes.fileModificationDate;
-        NSDate *markerDate = markerAttributes.fileModificationDate;
-        needsUnpack = (sourceDate && markerDate && [sourceDate compare:markerDate] == NSOrderedDescending);
-    }
-
-    if (!needsUnpack) {
-        TXLog(@"复用已有解包结果: %@", destination);
-        return destination;
-    }
-
-    TXLog(@"开始解包 .tendies: %@ -> %@", containerPath, destination);
-    TXZipArchive *archive = [TXZipArchive archiveWithContentsOfFile:containerPath];
-    if (!archive) {
-        TXLog(@"不是合法的 zip 容器: %@", containerPath);
-        return nil;
-    }
-
-    [fm removeItemAtPath:destination error:NULL];
-    NSError *error = nil;
-    if (![archive extractToDirectory:destination error:&error]) {
-        TXLog(@"解包失败: %@", error.localizedDescription ?: @"未知错误");
-        return nil;
-    }
-
-    [@"1" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-    return destination;
-}
-
-/// 目录名安全化（转发到静态函数，保持旧调用点可用）
-- (NSString *)tx_safeComponent:(NSString *)component {
-    return TXSafeComponentName(component);
 }
 
 #pragma mark - 递归扫描（不假设任何固定目录）
@@ -329,11 +170,14 @@ static NSString *TXSafeComponentName(NSString *component) {
 - (BOOL)tx_scanDirectory:(NSString *)directory {
     NSFileManager *fm = NSFileManager.defaultManager;
 
-    NSMutableArray<NSString *> *videos = [NSMutableArray array];
-    NSMutableArray<NSString *> *images = [NSMutableArray array];
-    NSMutableArray<NSString *> *caBundles = [NSMutableArray array];
-    NSMutableArray<NSString *> *wallpaperDirs = [NSMutableArray array];
-    NSMutableArray<NSString *> *plists = [NSMutableArray array];
+    NSUInteger videoCount = 0;
+    NSUInteger imageCount = 0;
+    NSUInteger caCount = 0;
+    NSString *largestVideo = nil;
+    NSString *largestImage = nil;
+    NSString *wallpaperDir = nil;
+    unsigned long long largestVideoSize = 0;
+    unsigned long long largestImageSize = 0;
 
     NSDirectoryEnumerator<NSString *> *enumerator = [fm enumeratorAtPath:directory];
     for (NSString *relative in enumerator) {
@@ -341,106 +185,77 @@ static NSString *TXSafeComponentName(NSString *component) {
         if ([item isEqualToString:@".DS_Store"]) {
             continue;
         }
+
         NSString *full = [directory stringByAppendingPathComponent:relative];
-        NSString *ext = [item.pathExtension lowercaseString];
+        NSString *ext = item.pathExtension.lowercaseString;
 
         BOOL isDir = NO;
         [fm fileExistsAtPath:full isDirectory:&isDir];
         if (isDir) {
             if ([ext isEqualToString:@"ca"]) {
-                [caBundles addObject:full];
-            } else if ([ext isEqualToString:@"wallpaper"]) {
-                [wallpaperDirs addObject:full];
+                caCount++;
+            } else if (!wallpaperDir && [ext isEqualToString:@"wallpaper"]) {
+                wallpaperDir = full;
             }
             continue;
         }
 
         if (TXExtensionInList(ext, kTXVideoExtensions)) {
-            [videos addObject:full];
+            videoCount++;
+            unsigned long long size = TXFileSize(full);
+            if (size > largestVideoSize) {
+                largestVideoSize = size;
+                largestVideo = full;
+            }
         } else if (TXExtensionInList(ext, kTXImageExtensions)) {
-            [images addObject:full];
-        } else if ([ext isEqualToString:@"plist"]) {
-            [plists addObject:full];
-        }
-    }
-
-    TXLog(@"扫描 %@: 视频 %lu / 图片 %lu / .ca 包 %lu / .wallpaper 目录 %lu / plist %lu",
-          directory.lastPathComponent,
-          (unsigned long)videos.count, (unsigned long)images.count,
-          (unsigned long)caBundles.count, (unsigned long)wallpaperDirs.count,
-          (unsigned long)plists.count);
-
-    // 描述 plist：优先 Wallpaper.plist / providerInfo.plist
-    for (NSString *plist in plists) {
-        NSString *name = plist.lastPathComponent;
-        if ([name isEqualToString:@"Wallpaper.plist"] || [name isEqualToString:@"providerInfo.plist"]) {
-            NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:plist];
+            imageCount++;
+            unsigned long long size = TXFileSize(full);
+            if (size > largestImageSize) {
+                largestImageSize = size;
+                largestImage = full;
+            }
+        } else if (!_descriptor.count
+                   && ([item isEqualToString:@"Wallpaper.plist"]
+                       || [item isEqualToString:@"providerInfo.plist"])) {
+            NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:full];
             if ([dict isKindOfClass:NSDictionary.class]) {
                 _descriptor = dict;
-                break;
             }
         }
     }
 
-    _caBundlePaths = [caBundles copy];
+    TXLog(@"扫描 %@: 视频 %lu / 图片 %lu / .ca 包 %lu / .wallpaper 目录 %@",
+          directory.lastPathComponent, (unsigned long)videoCount, (unsigned long)imageCount,
+          (unsigned long)caCount, wallpaperDir ? @"有" : @"无");
 
-    // 类型判定：视频优先，其次 .ca，再次纯图片
-    if (videos.count) {
-        // 取体积最大的视频作为主视频
-        NSString *main = videos.firstObject;
-        unsigned long long largest = 0;
-        for (NSString *video in videos) {
-            unsigned long long size = TXFileSize(video);
-            if (size > largest) {
-                largest = size;
-                main = video;
-            }
-        }
-        _videoURL = [NSURL fileURLWithPath:main];
+    if (videoCount) {
+        _videoURL = [NSURL fileURLWithPath:largestVideo];
         _kind = TXWallpaperKindVideo;
-    } else if (caBundles.count) {
+    } else if (caCount) {
         _kind = TXWallpaperKindCA;
-    } else if (images.count) {
+    } else if (imageCount) {
         _kind = TXWallpaperKindImage;
     } else {
-        _kind = TXWallpaperKindUnknown;
         return NO;
     }
 
-    if (images.count) {
-        NSString *fallback = TXChooseFallbackImage(images);
-        if (fallback) {
-            _fallbackImageURL = [NSURL fileURLWithPath:fallback];
-        }
+    if (largestImage) {
+        _fallbackImageURL = [NSURL fileURLWithPath:largestImage];
     }
 
-    // 展示名：优先 .wallpaper 目录名，其次 Wallpaper.plist 里的名字，最后文件名
-    NSString *name = wallpaperDirs.firstObject.lastPathComponent;
-    if (name.length) {
-        _displayName = [name stringByDeletingPathExtension];
-    } else {
+    NSString *name = wallpaperDir.lastPathComponent.stringByDeletingPathExtension;
+    if (!name.length) {
         id plistName = _descriptor[@"name"] ?: _descriptor[@"displayName"];
-        _displayName = [plistName isKindOfClass:NSString.class]
+        name = [plistName isKindOfClass:NSString.class]
             ? plistName
-            : [_path.lastPathComponent stringByDeletingPathExtension];
+            : _path.lastPathComponent;
     }
-    // 去掉分辨率尾巴，例如 7400.WWDC_2022-390w-844h@3x~iphone
-    NSRange dash = [_displayName rangeOfString:@"-\\d+w-\\d+h" options:NSRegularExpressionSearch];
-    if (dash.location != NSNotFound) {
-        _displayName = [_displayName substringToIndex:dash.location];
-    }
+    _displayName = TXTrimmedName(name);
 
-    id still = _descriptor[@"stillTime"] ?: _descriptor[@"still_time"];
-    if ([still respondsToSelector:@selector(doubleValue)]) {
-        _stillTime = [still doubleValue];
-    }
-
-    TXLog(@"解析成功: name=%@ kind=%@ video=%@ fallbackImage=%@ .ca=%lu zip=%@",
+    TXLog(@"解析成功: name=%@ kind=%@ video=%@ fallbackImage=%@",
           _displayName, _kind,
           _videoURL.lastPathComponent ?: @"(无)",
-          _fallbackImageURL.lastPathComponent ?: @"(无)",
-          (unsigned long)_caBundlePaths.count,
-          _unpackedFromZip ? @"是" : @"否");
+          _fallbackImageURL.lastPathComponent ?: @"(无)");
     return YES;
 }
 

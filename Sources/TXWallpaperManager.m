@@ -217,18 +217,12 @@ static void TXDumpHierarchyOnce(UIView *view) {
         path = remapped;
     }
 
-    if (!path.length) {
-        NSArray<NSString *> *candidates = [TXTendiesPackage availablePackagePaths];
-        for (NSUInteger i = 0; i < candidates.count; i++) {
-            TXLog(@"候选壁纸[%lu]: %@", (unsigned long)i, TXShortPath(candidates[i]));
-        }
-        path = candidates.firstObject;
-        if (path.length) {
-            TXLog(@"未配置 ActivePackagePath，自动发现: %@", TXShortPath(path));
-        }
-    }
-
+    // 配置的路径失效（被删 / 未导入）时自动回落到素材库里的第一个
     self.activePackage = [TXTendiesPackage packageAtPath:path];
+    if (!self.activePackage) {
+        path = [TXTendiesPackage firstAvailablePackagePath];
+        self.activePackage = [TXTendiesPackage packageAtPath:path];
+    }
 
     TXLog(@"重新加载: enabled=%d interaction=%d parallax=%d path=%@ -> %@",
           prefs.enabled, prefs.interactionEnabled, prefs.parallaxEnabled,
