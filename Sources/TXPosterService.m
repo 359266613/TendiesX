@@ -29,6 +29,18 @@
 + (id)sharedInstance;
 @end
 
+//  读回结果时要用到这两个属性。为什么单独声明成协议 + 强转：
+//  clang 对「未知 selector + id 接收者」是**报错**（不是警告）
+//  —— error: no known instance method for selector 'providerBundleIdentifier'。
+//  （`identifier` 之所以能编过，只是因为它恰好被某个系统头声明过，不能依赖。）
+@protocol TXPRSPosterDescriptorReading <NSObject>
+- (NSString *)identifier;
+@end
+
+@protocol TXPRSPosterConfigurationReading <NSObject>
+- (NSString *)providerBundleIdentifier;
+@end
+
 static id TXPRSServiceInstance(void) {
     Class cls = NSClassFromString(@"PRSService");
     if (!cls) {
@@ -115,7 +127,7 @@ static BOOL TXIsPosterConfiguration(id object) {
         NSMutableArray *identifiers = [NSMutableArray array];
         for (id one in list) {
             NSString *identifier = [one respondsToSelector:@selector(identifier)]
-                ? [one identifier] : nil;
+                ? [(id<TXPRSPosterDescriptorReading>)one identifier] : nil;
             if (identifier.length) {
                 [identifiers addObject:identifier];
             }
@@ -271,7 +283,7 @@ static BOOL TXIsPosterConfiguration(id object) {
     [(id<TXPRSService>)service fetchSelectedConfiguration:^(id configuration) {
         NSString *provider = nil;
         if ([configuration respondsToSelector:@selector(providerBundleIdentifier)]) {
-            provider = [configuration providerBundleIdentifier];
+            provider = [(id<TXPRSPosterConfigurationReading>)configuration providerBundleIdentifier];
         }
         BOOL matched = [provider isEqualToString:extension];
         TXLog(@"[PRS] 生效：回读当前配置 %@ provider=%@ 匹配=%@",
