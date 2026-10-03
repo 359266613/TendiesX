@@ -16,7 +16,8 @@ TendiesX_FILES = Hooks/Worker.xm \
 	Sources/TXLogger.m \
 	Sources/TXPreferences.m \
 	Sources/TXZipArchive.m \
-	Sources/TXPosterInstaller.m
+	Sources/TXPosterInstaller.m \
+	Sources/TXPosterService.m
 TendiesX_CFLAGS = -fobjc-arc \
 	-I./Sources \
 	-Wno-error \

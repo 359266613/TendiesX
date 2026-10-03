@@ -338,7 +338,8 @@ static NSArray *gTXRootSpecifiers = nil;
                                          NULL, NULL, YES);
 
     __weak TXRootListController *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
+    // worker 侧要解包 + 复制 + 等 PRS 重扫，给足时间再回读结果
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         NSString *message = TXPrefGet(@"LastInstallMessage");
         [weakSelf tx_alertMessage:[NSString stringWithFormat:

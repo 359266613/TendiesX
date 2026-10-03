@@ -23,6 +23,10 @@ static BOOL TXIsJunkEntry(NSString *name) {
         || [name isEqualToString:@"README.md"];
 }
 
+@interface TXPosterInstaller ()
+@property (nonatomic, copy, readwrite) NSString *lastInstalledExtension;
+@end
+
 @implementation TXPosterInstaller
 
 + (instancetype)sharedInstaller {
@@ -127,6 +131,32 @@ static BOOL TXIsJunkEntry(NSString *name) {
 
 #pragma mark - 源 descriptor 定位
 
+/// documentation.md：descriptor 文件夹叫 descriptor 或 descriptors，
+/// 还可以加 ordered 之类的修饰词，所以按「名字里含 descriptor」来认，而不是精确匹配。
+static BOOL TXIsDescriptorsFolderName(NSString *name) {
+    return [name.lowercaseString containsString:@"descriptor"];
+}
+
+/// documentation.md：文件夹名带 mercury → MercuryPoster；
+/// 带 video / photos → PhotosPosterProvider；默认 CollectionsPoster。
+static NSString *TXExtensionForNames(NSArray<NSString *> *names) {
+    for (NSString *name in names) {
+        NSString *lower = name.lowercaseString;
+        if ([lower containsString:@"mercury"]) {
+            return @"com.apple.MercuryPoster";
+        }
+        if ([lower containsString:@"photos"] || [lower containsString:@"video"]) {
+            return @"com.apple.PhotosUIPrivate.PhotosPosterProvider";
+        }
+    }
+    return kTXDefaultPosterExtension;
+}
+
+/// 看起来像 bundle id（含点号）才当成扩展 ID 用
+static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
+    return [name containsString:@"."] && ![name hasPrefix:@"."] && name.length > 3;
+}
+
 /// 支持两种 .tendies 布局：
 ///   descriptors/<UUID>/...                                     （descriptor 格式）
 ///   Container/.../Extensions/<扩展ID>/descriptors/<UUID>/...    （container 格式，扩展 ID 从路径反推）
@@ -135,26 +165,37 @@ static BOOL TXIsJunkEntry(NSString *name) {
                   extension:(NSString **)outExtension {
     NSFileManager *fm = NSFileManager.defaultManager;
 
-    NSString *direct = [directory stringByAppendingPathComponent:@"descriptors"];
-    if (TXIsDirectory(direct)) {
-        *outDir = direct;
-        *outExtension = kTXDefaultPosterExtension;
+    // 1) descriptor 格式：<包>/descriptors（兼容 descriptor / "descriptors ordered"）
+    for (NSString *item in [fm contentsOfDirectoryAtPath:directory error:NULL]) {
+        if (!TXIsDescriptorsFolderName(item)) {
+            continue;
+        }
+        NSString *full = [directory stringByAppendingPathComponent:item];
+        if (!TXIsDirectory(full)) {
+            continue;
+        }
+        *outDir = full;
+        *outExtension = TXExtensionForNames(@[directory.lastPathComponent, item]);
         return YES;
     }
 
+    // 2) container 格式：<包>/Container/.../Extensions/<扩展ID>/descriptors
     NSString *container = [directory stringByAppendingPathComponent:@"Container"];
     NSString *root = TXIsDirectory(container) ? container : directory;
     for (NSString *relative in [fm enumeratorAtPath:root]) {
-        if (![relative.lastPathComponent isEqualToString:@"descriptors"]) {
+        if (!TXIsDescriptorsFolderName(relative.lastPathComponent)) {
             continue;
         }
         NSString *absolute = [root stringByAppendingPathComponent:relative];
         if (!TXIsDirectory(absolute)) {
             continue;
         }
-        NSString *ext = absolute.stringByDeletingLastPathComponent.lastPathComponent;
+        // 上一级目录就是扩展 ID（形如 com.apple.WallpaperKit.CollectionsPoster）
+        NSString *parent = absolute.stringByDeletingLastPathComponent.lastPathComponent;
         *outDir = absolute;
-        *outExtension = ext.length ? ext : kTXDefaultPosterExtension;
+        *outExtension = TXLooksLikeBundleIdentifier(parent)
+            ? parent
+            : TXExtensionForNames(@[directory.lastPathComponent, relative]);
         return YES;
     }
     return NO;
@@ -221,6 +262,7 @@ static BOOL TXIsJunkEntry(NSString *name) {
 
     NSString *destRoot = [versionDir stringByAppendingPathComponent:
                           [NSString stringWithFormat:@"Extensions/%@/descriptors", extension]];
+    _lastInstalledExtension = [extension copy];
     TXLog(@"[A] 源=%@ 扩展=%@ 目标=%@", sourceDir, extension, destRoot);
 
     NSFileManager *fm = NSFileManager.defaultManager;

@@ -25,6 +25,11 @@
 /// @return 实际写入的 descriptor 目录路径（空数组表示失败，日志里有原因）
 - (NSArray<NSString *> *)installFromPath:(NSString *)path;
 
+/// 上一次安装到的扩展 ID（如 com.apple.WallpaperKit.CollectionsPoster）。
+/// documentation.md：文件夹名带 video/photos → PhotosPosterProvider，
+/// 带 mercury → MercuryPoster，默认 CollectionsPoster。
+@property (nonatomic, copy, readonly) NSString *lastInstalledExtension;
+
 /// 海报存储根目录；读不到返回 nil
 + (NSString *)storeRoot;
 
