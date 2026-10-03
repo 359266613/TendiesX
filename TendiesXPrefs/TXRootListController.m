@@ -20,9 +20,10 @@
 
 static NSString *const kTXDomain = @"com.axs.tendiesx";
 static NSString *const kTXReloadNotification = @"com.axs.tendiesx/ReloadPrefs";
-/// 清理：与 Tweak 侧统一 —— 只有一个根目录，素材库是它的 Library 子目录
-static NSString *const kTXBaseDir    = @"/var/mobile/Library/TendiesX";
-static NSString *const kTXLibraryDir = @"/var/mobile/Library/TendiesX/Library";
+/// 与 Tweak 侧统一：只有一个根目录
+///   <根>/xxx.tendies     投放中的压缩包
+///   <根>/xxx.tendies/    解压后的素材目录（同名，但是目录）
+static NSString *const kTXBaseDir = @"/var/mobile/Library/TendiesX";
 /// 「自动」选项对应的值（空串 = 让 Tweak 自动发现）
 static NSString *const kTXAutoValue = @"";
 static NSString *const kTXAutoTitle = @"自动（扫描到的第一个）";
@@ -79,13 +80,16 @@ static NSString *TXDisplayName(NSString *path) {
     return dash.location == NSNotFound ? name : [name substringToIndex:dash.location];
 }
 
-/// 素材库里的每个子目录 = 一个可用壁纸
-static NSArray<NSString *> *TXScanLibrary(void) {
+/// xxx.tendies 是「目录」的才是可用素材；是「压缩包」的属于还没导入
+static NSArray<NSString *> *TXScanPackages(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSMutableArray<NSString *> *found = [NSMutableArray array];
 
-    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXLibraryDir error:NULL]) {
-        NSString *full = [kTXLibraryDir stringByAppendingPathComponent:item];
+    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXBaseDir error:NULL]) {
+        if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"] == NO) {
+            continue;
+        }
+        NSString *full = [kTXBaseDir stringByAppendingPathComponent:item];
         BOOL isDir = NO;
         if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
             [found addObject:full];
@@ -96,11 +100,19 @@ static NSArray<NSString *> *TXScanLibrary(void) {
     return found;
 }
 
-/// 投放目录里还没导入的 .tendies 数量（只用于提示，不参与选择）
+/// 还没导入的压缩包数量（只用于提示行）
 static NSUInteger TXPendingImportCount(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
     NSUInteger count = 0;
-    for (NSString *item in [NSFileManager.defaultManager contentsOfDirectoryAtPath:kTXBaseDir error:NULL]) {
-        if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+
+    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXBaseDir error:NULL]) {
+        if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"] == NO
+            || [item hasPrefix:@"."]) {
+            continue;
+        }
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:[kTXBaseDir stringByAppendingPathComponent:item]
+                     isDirectory:&isDir] && !isDir) {
             count++;
         }
     }
@@ -124,12 +136,12 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
         NSMutableArray<NSString *> *paths = [NSMutableArray array];
 
         NSString *current = TXPrefGet(@"ActivePackagePath");
-        NSArray<NSString *> *packages = TXScanLibrary();
+        NSArray<NSString *> *packages = TXScanPackages();
 
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"点一下即可切换"]];
 
         if (TXPendingImportCount()) {
-            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"检测到未导入的 .tendies，请回上一页点「导入 / 重新扫描素材」"
+            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"检测到未导入的 .tendies，请回上一页导入"
                                                            target:nil set:nil get:nil detail:nil
                                                              cell:TXCellStaticText edit:nil]];
         }
@@ -253,10 +265,10 @@ static NSArray *gTXRootSpecifiers = nil;
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"导入素材"]];
         [self tx_buttonNamed:@"从「文件」App 选择 .tendies" action:@selector(tx_pickFiles:) to:specs];
         [self tx_buttonNamed:@"重新扫描素材目录" action:@selector(tx_rescan:) to:specs];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"导入时自动解压到 Library/，不留 .tendies 原文件"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"解压后是 /var/mobile/Library/TendiesX/名字.tendies/（同名目录），不留压缩包"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
-        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"也可以直接用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/"
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"也可以直接用 Filza 把 .tendies 丢进 /var/mobile/Library/TendiesX/ 再点重新扫描"
                                                        target:nil set:nil get:nil detail:nil
                                                          cell:TXCellStaticText edit:nil]];
 
@@ -346,8 +358,9 @@ static NSArray *gTXRootSpecifiers = nil;
         if (![[name.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
             name = [name stringByAppendingPathExtension:@"tendies"];
         }
+        // 目标与解压目录同名（xxx.tendies）：删掉旧的压缩包或旧素材目录，实现同名替换
         NSString *destination = [kTXBaseDir stringByAppendingPathComponent:name];
-        [fm removeItemAtPath:destination error:NULL];   // 同名直接覆盖，便于重新导入
+        [fm removeItemAtPath:destination error:NULL];
 
         NSError *error = nil;
         if ([fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:destination] error:&error]) {

@@ -7,8 +7,12 @@ NSString *const TXWallpaperKindCA      = @"ca";
 NSString *const TXWallpaperKindImage   = @"image";
 NSString *const TXWallpaperKindUnknown = @"unknown";
 
-/// 唯一根目录：投放目录就是它本身，素材库是它的 Library 子目录
-static NSString *const kTXBaseDirectory = @"/var/mobile/Library/TendiesX";
+/// 唯一根目录：压缩包投放 + 解压结果都在这里（解压目录与压缩包同名，只是变成目录）
+///   <根>/xxx.tendies     投放中的压缩包
+///   <根>/xxx.tendies/    解压后的素材目录
+static NSString *const kTXStorageDirectory = @"/var/mobile/Library/TendiesX";
+/// 解压暂存目录：先解到这里，删掉压缩包后再改名成 xxx.tendies
+static NSString *const kTXStagingName = @".importing";
 
 static NSString *const kTXVideoExtensions[] = { @"mp4", @"mov", @"m4v", nil };
 static NSString *const kTXImageExtensions[] = { @"png", @"jpg", @"jpeg", nil };
@@ -24,16 +28,18 @@ static BOOL TXExtensionInList(NSString *ext, NSString *const *list) {
     return NO;
 }
 
-static unsigned long long TXFileSize(NSString *path) {
-    return [[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL] fileSize];
+static BOOL TXIsTendiesName(NSString *name) {
+    return [name.pathExtension.lowercaseString isEqualToString:@"tendies"];
 }
 
-/// 目录名安全化（避免路径穿越与非法字符）
-static NSString *TXSafeComponentName(NSString *component) {
-    NSCharacterSet *illegal = [NSCharacterSet characterSetWithCharactersInString:@"/\\:*?\"<>|"];
-    NSString *safe = [[component componentsSeparatedByCharactersInSet:illegal] componentsJoinedByString:@"_"];
-    safe = [safe stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    return safe.length ? safe : @"package";
+static BOOL TXIsDirectoryAtPath(NSString *path) {
+    BOOL isDir = NO;
+    [NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDir];
+    return isDir;
+}
+
+static unsigned long long TXFileSize(NSString *path) {
+    return [[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL] fileSize];
 }
 
 /// 去掉分辨率尾巴，例如 7400.WWDC_2022-390w-844h@3x~iphone -> 7400.WWDC_2022
@@ -42,23 +48,16 @@ static NSString *TXTrimmedName(NSString *name) {
     return range.location == NSNotFound ? name : [name substringToIndex:range.location];
 }
 
-/// 素材库目录（失败时回落到临时目录）
-static NSString *TXLibraryDirectory(void) {
-    static NSString *dir = nil;
+/// 确保根目录存在
+static NSString *TXStorageDirectoryPath(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSFileManager *fm = NSFileManager.defaultManager;
-        NSString *candidate = [kTXBaseDirectory stringByAppendingPathComponent:@"Library"];
-        if ([fm createDirectoryAtPath:candidate withIntermediateDirectories:YES attributes:nil error:NULL]
-            || [fm fileExistsAtPath:candidate]) {
-            dir = candidate;
-            return;
-        }
-        NSString *fallback = [NSTemporaryDirectory() stringByAppendingPathComponent:@"TendiesX/Library"];
-        [fm createDirectoryAtPath:fallback withIntermediateDirectories:YES attributes:nil error:NULL];
-        dir = fallback;
+        [NSFileManager.defaultManager createDirectoryAtPath:kTXStorageDirectory
+                               withIntermediateDirectories:YES
+                                                attributes:nil
+                                                     error:NULL];
     });
-    return dir;
+    return kTXStorageDirectory;
 }
 
 @interface TXTendiesPackage ()
@@ -75,61 +74,90 @@ static NSString *TXLibraryDirectory(void) {
 
 #pragma mark - 目录与导入
 
-+ (NSString *)libraryDirectory { return TXLibraryDirectory(); }
-+ (NSString *)inboxDirectory   { return kTXBaseDirectory; }
++ (NSString *)storageDirectory {
+    return TXStorageDirectoryPath();
+}
 
 + (NSDictionary<NSString *, NSString *> *)importPendingPackagesWithSourceRemoval:(BOOL)removeSource {
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *library = TXLibraryDirectory();
+    NSString *base = TXStorageDirectoryPath();
     NSMutableDictionary<NSString *, NSString *> *mapping = [NSMutableDictionary dictionary];
 
-    for (NSString *item in [fm contentsOfDirectoryAtPath:kTXBaseDirectory error:NULL]) {
-        if (![[item.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+    for (NSString *item in [fm contentsOfDirectoryAtPath:base error:NULL]) {
+        if (!TXIsTendiesName(item)) {
             continue;
         }
 
-        NSString *source = [kTXBaseDirectory stringByAppendingPathComponent:item];
-        NSString *destination = [library stringByAppendingPathComponent:
-                                 TXSafeComponentName(item.stringByDeletingPathExtension)];
-        NSString *marker = [destination stringByAppendingPathComponent:@".unpacked"];
+        NSString *source = [base stringByAppendingPathComponent:item];
+        if (TXIsDirectoryAtPath(source)) {
+            continue;   // 已经是解压后的素材目录
+        }
 
-        // 没解压过、或源文件比上次解压更新（重新导入同一份素材）→ 重新解压
+        // 解压目标与压缩包同名（只是从文件变成目录）
+        NSString *destination = source;
         NSDate *sourceDate = [fm attributesOfItemAtPath:source error:NULL].fileModificationDate;
-        NSDate *markerDate = [fm attributesOfItemAtPath:marker error:NULL].fileModificationDate;
-        BOOL needsExtract = !markerDate
-            || (sourceDate && [sourceDate compare:markerDate] == NSOrderedDescending);
-        if (needsExtract) {
-            TXLog(@"导入素材: %@", item);
-            TXZipArchive *archive = [TXZipArchive archiveWithContentsOfFile:source];
-            NSError *error = nil;
-            if (!archive || ![archive extractToDirectory:destination error:&error]) {
-                TXLog(@"导入失败（保留源文件）: %@（%@）", item,
-                      error.localizedDescription ?: @"不是合法 zip");
+
+        if (TXIsDirectoryAtPath(destination)) {
+            // 已导入过：压缩包不比目录新就直接删掉压缩包
+            NSDate *destinationDate = [fm attributesOfItemAtPath:destination error:NULL].fileModificationDate;
+            BOOL newer = sourceDate && destinationDate
+                && [sourceDate compare:destinationDate] == NSOrderedDescending;
+            if (!newer) {
+                if (removeSource) {
+                    [fm removeItemAtPath:source error:NULL];
+                }
+                mapping[source] = destination;
                 continue;
             }
-            [@"1" writeToFile:marker atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            TXLog(@"重新导入（压缩包更新）: %@", item);
+            [fm removeItemAtPath:destination error:NULL];
+        }
+
+        // 先解到暂存目录，成功后再腾位置改名，避免中途失败丢掉原压缩包
+        NSString *staging = [base stringByAppendingPathComponent:kTXStagingName];
+        [fm removeItemAtPath:staging error:NULL];
+
+        TXLog(@"导入素材: %@", item);
+        TXZipArchive *archive = [TXZipArchive archiveWithContentsOfFile:source];
+        NSError *error = nil;
+        if (!archive || ![archive extractToDirectory:staging error:&error]) {
+            TXLog(@"导入失败（保留压缩包）: %@（%@）", item,
+                  error.localizedDescription ?: @"不是合法 zip");
+            [fm removeItemAtPath:staging error:NULL];
+            continue;
         }
 
         if (removeSource) {
             NSError *removeError = nil;
             if (![fm removeItemAtPath:source error:&removeError]) {
-                TXLog(@"源文件删除失败: %@", removeError.localizedDescription);
+                TXLog(@"压缩包删除失败: %@", removeError.localizedDescription);
+                [fm removeItemAtPath:staging error:NULL];
+                continue;
             }
         }
+        if (![fm moveItemAtPath:staging toPath:destination error:&error]) {
+            TXLog(@"导入失败（改名失败）: %@（%@）", item, error.localizedDescription);
+            [fm removeItemAtPath:staging error:NULL];
+            continue;
+        }
+
         mapping[source] = destination;
+        TXLog(@"导入完成: %@", destination.lastPathComponent);
     }
     return mapping;
 }
 
 + (NSArray<NSString *> *)availablePackagePaths {
     NSFileManager *fm = NSFileManager.defaultManager;
-    NSString *library = TXLibraryDirectory();
+    NSString *base = TXStorageDirectoryPath();
     NSMutableArray<NSString *> *found = [NSMutableArray array];
 
-    for (NSString *item in [fm contentsOfDirectoryAtPath:library error:NULL]) {
-        NSString *full = [library stringByAppendingPathComponent:item];
-        BOOL isDir = NO;
-        if ([fm fileExistsAtPath:full isDirectory:&isDir] && isDir) {
+    for (NSString *item in [fm contentsOfDirectoryAtPath:base error:NULL]) {
+        if (!TXIsTendiesName(item)) {
+            continue;
+        }
+        NSString *full = [base stringByAppendingPathComponent:item];
+        if (TXIsDirectoryAtPath(full)) {
             [found addObject:full];
         }
     }
@@ -156,8 +184,7 @@ static NSString *TXLibraryDirectory(void) {
         _descriptor = @{};
         _caBundlePaths = @[];
 
-        BOOL isDir = NO;
-        if (![NSFileManager.defaultManager fileExistsAtPath:_path isDirectory:&isDir] || !isDir) {
+        if (!TXIsDirectoryAtPath(_path)) {
             TXLog(@"不是有效的素材目录: %@", _path);
             return nil;
         }
@@ -252,7 +279,7 @@ static NSString *TXLibraryDirectory(void) {
         id plistName = _descriptor[@"name"] ?: _descriptor[@"displayName"];
         name = [plistName isKindOfClass:NSString.class]
             ? plistName
-            : _path.lastPathComponent;
+            : _path.lastPathComponent.stringByDeletingPathExtension;
     }
     _displayName = TXTrimmedName(name);
 
