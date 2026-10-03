@@ -1,0 +1,9 @@
+{
+    entry = {
+        bundle = "TendiesXPrefs";
+        cell = PSLinkCell;
+        detail = "TXRootListController";
+        isController = 1;
+        label = "TendiesX";
+    };
+}

@@ -1,12 +1,13 @@
 //
 //  TendiesX.h
-//  统一入口头：公开框架 + 私有头（按依赖顺序）
+//  统一入口头：公开框架 + 手写私有 API。
+//  注意：Reference/ 下的 ipsw dump 头只作查方法用，禁止 import（会编译失败）。
 //
 
 #ifndef TendiesX_h
 #define TendiesX_h
 
-/* ---------- 公开框架（SDK 自带，无需 dump） ---------- */
+/* ---------- 公开框架（SDK 自带） ---------- */
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
@@ -15,20 +16,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import "TendiesXPublicFrameworks.h"   // Metal / MetalKit / CoreImage / ImageIO
 
-/* ---------- 私有头（顺序不可调换） ---------- */
-#import "Private/PBUIWallpaperOptions.h"
-#import "Private/PBUIWallpaperConfiguration.h"
-#import "Private/PBUIWallpaperView.h"
-#import "Private/PBUIStaticWallpaperView.h"
-#import "Private/PBUIWallpaperConfigurationManager.h"
-#import "Private/PBUIWallpaperViewController.h"
-#import "Private/SBFWallpaperView.h"
-#import "Private/SBFStaticWallpaperView.h"
-#import "Private/SBWallpaperController.h"
-#import "Private/SBHomeScreenViewController.h"
-#import "Private/SBLockScreenViewControllerBase.h"
-#import "Private/SBLockStateAggregator.h"
-#import "Private/CAFilter.h"
-#import "Private/CABackdropLayer.h"
+/* ---------- 私有 API（手写最小声明） ---------- */
+#import "TXWallpaper.h"
 
 #endif /* TendiesX_h */

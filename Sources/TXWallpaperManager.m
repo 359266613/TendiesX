@@ -92,13 +92,33 @@
     self = [super init];
     if (self) {
         _renderers = [NSMapTable weakToStrongObjectsMapTable];
+        // 设置面板改完偏好会发 Darwin 通知 -> TXPreferences 广播本通知 -> 这里重载
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(tx_preferencesDidReload)
+                                                     name:@"TXPreferencesDidReload"
+                                                   object:nil];
     }
     return self;
+}
+
+- (void)tx_preferencesDidReload {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        TXLog(@"收到偏好变更通知，重新加载壁纸");
+        [self reloadFromDisk];
+    });
 }
 
 - (void)reloadFromDisk {
     TXPreferences *prefs = TXPreferences.sharedInstance;
     NSString *path = prefs.activePackagePath;
+
+    if (!path.length) {
+        path = [TXTendiesPackage firstAvailablePackagePath];
+        if (path.length) {
+            TXLog(@"未配置 ActivePackagePath，自动发现: %@", path);
+        }
+    }
+
     self.activePackage = [TXTendiesPackage packageAtPath:path];
 
     TXLog(@"重新加载: enabled=%d interaction=%d parallax=%d path=%@ -> %@",

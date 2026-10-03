@@ -50,7 +50,7 @@ jobs:
     - name: Bump Package Version
       id: bump
       run: |
-        VERSION_PREFIX="5.2.0"
+        VERSION_PREFIX="0.0.1"
         VERSION="${VERSION_PREFIX}-${{ github.run_number }}"
         echo "Using version: $VERSION"
         sed -i '' "s/^Version: .*/Version: ${VERSION}/" control

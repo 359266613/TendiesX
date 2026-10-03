@@ -18,11 +18,23 @@
 @property (nonatomic, copy,   readonly) NSDictionary *descriptor; // 描述 plist
 @property (nonatomic, assign, readonly) NSTimeInterval stillTime;
 @property (nonatomic, assign, readonly) BOOL looping;
+@property (nonatomic, assign, readonly) BOOL unpackedFromZip;   // 是否由 zip 解包而来
 
 /// 路径以 .tendies 结尾即认为是容器
 + (BOOL)isTendiesURL:(NSURL *)url;
 
-/// 支持两种输入：已解包目录 / .tendies zip 文件
+/// 支持两种输入：已解包目录 / .tendies zip 文件（zip 会解到缓存目录）
 + (instancetype)packageAtPath:(NSString *)path;
+
+#pragma mark - 目录约定（设置面板也用它）
+
+/// 扫描目录：/var/mobile/Library/TendiesX、/var/mobile/Media/TendiesX、解包缓存目录
++ (NSArray<NSString *> *)searchDirectories;
+
+/// 扫描目录里所有可用的 .tendies（zip 文件或已解包目录），按路径排序
++ (NSArray<NSString *> *)availablePackagePaths;
+
+/// 第一个可用项（未配置 ActivePackagePath 时的自动发现）
++ (NSString *)firstAvailablePackagePath;
 
 @end
