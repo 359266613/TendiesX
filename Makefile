@@ -29,8 +29,9 @@ TendiesX_LIBRARIES = z
 # ---------- 设置面板（单 deb 双产物）----------
 # 面板只写偏好 + 发通知，真正的文件操作在 SpringBoard 侧（避开沙盒）
 BUNDLE_NAME = TendiesXPrefs
-TendiesXPrefs_FILES = TendiesXPrefs/TXRootListController.m Sources/TXLogger.m
+TendiesXPrefs_FILES = TendiesXPrefs/TendiesXRootListController.m Sources/TXLogger.m
 TendiesXPrefs_CFLAGS = -fobjc-arc \
+	-I./Headers \
 	-I./TendiesXPrefs \
 	-I./Sources \
 	-Wno-error

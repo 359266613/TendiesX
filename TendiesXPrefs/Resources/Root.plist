@@ -2,134 +2,58 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>title</key>
-	<string>TendiesX</string>
 	<key>items</key>
 	<array>
-
-		<!-- ================= 开关 ================= -->
 		<dict>
 			<key>cell</key>
-			<string>PSGroupSpecifier</string>
+			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>开关</string>
+			<string>基本设置</string>
 			<key>footerText</key>
-			<string>插件不做任何渲染：把 .tendies 装进系统海报库，动画交给 PosterBoard 原生渲染。</string>
+			<string>插件不渲染任何图层：把 .tendies 装进系统海报库，动画交给 PosterBoard 原生播放。</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>启用插件</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.axs.tendiesx</string>
 			<key>key</key>
 			<string>Enabled</string>
-			<key>default</key>
-			<true/>
-			<key>id</key>
-			<string>enabled</string>
+			<key>label</key>
+			<string>启用插件</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSSwitchCell</string>
-			<key>label</key>
-			<string>安装后自动设为当前壁纸</string>
-			<key>key</key>
-			<string>AutoApply</string>
 			<key>default</key>
 			<true/>
-			<key>id</key>
-			<string>autoApply</string>
+			<key>defaults</key>
+			<string>com.axs.tendiesx</string>
+			<key>key</key>
+			<string>AutoApply</string>
+			<key>label</key>
+			<string>安装后自动设为当前壁纸</string>
 		</dict>
-
-		<!-- ================= 素材 ================= -->
 		<dict>
 			<key>cell</key>
-			<string>PSGroupSpecifier</string>
+			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>素材</string>
 			<key>footerText</key>
-			<string>素材目录：/var/mobile/Library/TendiesX/（压缩包和已解包目录都行，也可以用 Filza 直接丢进去）</string>
+			<string>素材目录：/var/mobile/Library/TendiesX/（压缩包和已解包目录都行，也可用 Filza 直接丢进去）</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSTitleValueCell</string>
-			<key>label</key>
-			<string>当前素材：(无)</string>
 			<key>id</key>
 			<string>currentMaterial</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkCell</string>
 			<key>label</key>
-			<string>选择素材</string>
-			<key>detail</key>
-			<string>TXPackageListController</string>
-			<key>id</key>
-			<string>material</string>
+			<string>当前素材：无</string>
 		</dict>
-
-		<!-- ================= 安装 ================= -->
-		<dict>
-			<key>cell</key>
-			<string>PSGroupSpecifier</string>
-			<key>label</key>
-			<string>安装</string>
-			<key>footerText</key>
-			<string>安装 = 解包 .tendies 并把 descriptor 复制进系统海报库（版本目录按设备自动选 59 / 61）。重复安装会替换自己上一次装的那份，不再堆重复项。</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>安装选中的素材</string>
-			<key>action</key>
-			<string>tx_installPoster:</string>
-			<key>id</key>
-			<string>install</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>清理重复壁纸</string>
-			<key>action</key>
-			<string>tx_cleanupDuplicates:</string>
-			<key>id</key>
-			<string>cleanup</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>从「文件」App 选择 .tendies</string>
-			<key>action</key>
-			<string>tx_pickFiles:</string>
-			<key>id</key>
-			<string>pick</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>重新扫描素材目录</string>
-			<key>action</key>
-			<string>tx_rescan:</string>
-			<key>id</key>
-			<string>rescan</string>
-		</dict>
-
-		<!-- ================= 说明 ================= -->
-		<dict>
-			<key>cell</key>
-			<string>PSGroupSpecifier</string>
-			<key>label</key>
-			<string>说明</string>
-			<key>footerText</key>
-			<string>装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；开了自动生效则直接替换当前壁纸。
-运行日志：/var/mobile/Library/Logs/TendiesX.log</string>
-		</dict>
-
 	</array>
+	<key>title</key>
+	<string>TendiesX</string>
 </dict>
 </plist>

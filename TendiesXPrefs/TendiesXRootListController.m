@@ -1,0 +1,380 @@
+//
+//  TendiesXRootListController.m
+//  设置面板（按 ios-tweak-scaffold 模板）：
+//    · Resources/Root.plist → 规格行（开关等），改文案不用重编
+//    · 本文件               → 动态行：素材操作按钮组 + 固定「关于我们」按钮组
+//
+//  面板只做三件事：写偏好、发 Darwin 通知、把结果弹出来。
+//  真正的文件操作（解包 / 装 descriptor / 设为当前壁纸）在 SpringBoard 侧 worker 里做，
+//  因为设置 App 的沙盒写不了别的 App 容器。
+//
+
+#import "TendiesXRootListController.h"
+#import <Preferences/PSSpecifier.h>
+#import <objc/runtime.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import "TXLogger.h"
+
+static NSString * const kDomain = @"com.axs.tendiesx";   // 与 control 的 Package 一致
+static NSString * const kMediaDir = @"/var/mobile/Library/TendiesX";
+static NSString * const kInstallNote = @"com.axs.tendiesx/InstallPoster";
+static NSString * const kCleanupNote = @"com.axs.tendiesx/CleanupDuplicates";
+
+#pragma mark - 规格写回
+
+// 表数据源读的是 PSListController 自己的 _specifiers 实例变量：只 return 不写回时界面全白。
+// 这里按 ivar 名写，不声明 ivar（声明 ivar 等于猜内存布局，会写错偏移）。
+static void TXSetSpecifiers(PSListController *controller, NSArray *specifiers) {
+    static Ivar ivar;
+    if (!ivar) {
+        ivar = class_getInstanceVariable(PSListController.class, "_specifiers");
+    }
+    if (ivar) {
+        object_setIvar(controller, ivar, specifiers);
+    }
+}
+
+#pragma mark - 素材目录
+
+// 素材目录里的全部 .tendies：压缩包和已解包目录都算（worker 侧会自动解包）
+static NSArray<NSString *> *TXPackages(void) {
+    NSMutableArray<NSString *> *found = [NSMutableArray array];
+    for (NSString *item in [NSFileManager.defaultManager contentsOfDirectoryAtPath:kMediaDir
+                                                                            error:NULL]) {
+        if ([[item.pathExtension lowercaseString] isEqualToString:@"tendies"] && ![item hasPrefix:@"."]) {
+            [found addObject:[kMediaDir stringByAppendingPathComponent:item]];
+        }
+    }
+    [found sortUsingSelector:@selector(compare:)];
+    return found;
+}
+
+// 显示名：去掉 "-1234w-5678h" 这类分辨率后缀
+static NSString *TXDisplayName(NSString *path) {
+    NSString *name = [[path lastPathComponent] stringByDeletingPathExtension];
+    NSRange dash = [name rangeOfString:@"-\\d+w-\\d+h" options:NSRegularExpressionSearch];
+    return dash.location == NSNotFound ? name : [name substringToIndex:dash.location];
+}
+
+#pragma mark - 素材列表（二级页：扫目录得到，动态行）
+
+@interface TXPackageListController : PSListController
+@end
+
+@implementation TXPackageListController {
+    NSArray *_rows;
+    NSArray<NSString *> *_paths;   // 与第 0 组的行一一对应
+}
+
+- (NSArray *)specifiers {
+    if (!_rows) {
+        NSString *current = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
+        NSMutableArray *specs = [NSMutableArray arrayWithObject:
+                                 [PSSpecifier groupSpecifierWithName:@"点一下选中要安装的素材"]];
+        NSMutableArray<NSString *> *paths = [NSMutableArray array];
+
+        for (NSString *path in TXPackages()) {
+            NSString *title = [NSString stringWithFormat:@"%@%@",
+                               [path isEqualToString:current] ? @"✓ " : @"", TXDisplayName(path)];
+            [specs addObject:[PSSpecifier preferenceSpecifierNamed:title target:nil set:nil get:nil
+                                                            detail:nil cell:PSTitleValueCell edit:nil]];
+            [paths addObject:path];
+        }
+        if (!paths.count) {
+            [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"还没有素材：回上一页用「文件」App 选一个 .tendies"
+                                                           target:nil set:nil get:nil
+                                                         detail:nil cell:PSTitleValueCell edit:nil]];
+        }
+        _paths = [paths copy];
+        _rows = [specs copy];
+        TXLog(@"面板: 素材列表 %lu 个", (unsigned long)paths.count);
+    }
+    TXSetSpecifiers(self, _rows);
+    return _rows;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"选择素材";
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    _rows = nil;   // 每次进来重扫，素材增删都看得见
+    _paths = nil;
+    [self reloadSpecifiers];
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section != 0 || indexPath.row >= (NSInteger)_paths.count) {
+        return;
+    }
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kDomain];
+    [defaults setObject:_paths[indexPath.row] forKey:@"SourcePath"];
+    [defaults synchronize];
+    TXLog(@"面板: 已选中素材 %@", _paths[indexPath.row]);
+
+    _rows = nil;   // 不自动返回：把 ✓ 刷出来，用户能看到确实选过去了
+    _paths = nil;
+    [self reloadSpecifiers];
+}
+
+@end
+
+#pragma mark - 根页面
+
+@interface TendiesXRootListController () <UIDocumentPickerDelegate>
+- (void)btn:(NSString *)title act:(SEL)action to:(NSMutableArray *)array;
+- (void)tx_installPoster:(id)sender;
+- (void)tx_cleanupDuplicates:(id)sender;
+- (void)tx_pickFiles:(id)sender;
+- (void)tx_rescan:(id)sender;
+- (void)pollResult:(NSUInteger)attempt;
+- (void)notify:(NSString *)name;
+- (void)alert:(NSString *)message;
+- (void)openURL:(NSURL *)primary fallback:(NSURL *)fallback;
+- (void)openSileoRepo;
+- (void)openSileoRepo:(id)_;
+- (void)openTelegramChannel;
+- (void)openTelegramChannel:(id)_;
+- (void)openQQGroup;
+- (void)openQQGroup:(id)_;
+@end
+
+@implementation TendiesXRootListController {
+    NSArray *_rows;   // 规格缓存（plist 行 + 代码追加的按钮组）
+}
+
+- (NSArray *)specifiers {
+    if (!_rows) {
+        NSMutableArray *specs = [[self loadSpecifiersFromPlistName:@"Root" target:self] mutableCopy];
+
+        // 素材操作（按钮一律在代码里生成：模板约定，plist 只放规格行）
+        PSSpecifier *ops = [PSSpecifier groupSpecifierWithName:@"素材操作"];
+        [ops setProperty:@"装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；开了自动生效则直接替换当前壁纸。"
+                  forKey:@"footerText"];
+        [specs addObject:ops];
+        [self btn:@"安装选中的素材" act:@selector(tx_installPoster:) to:specs];
+        [self btn:@"清理重复壁纸" act:@selector(tx_cleanupDuplicates:) to:specs];
+        [specs addObject:[PSSpecifier preferenceSpecifierNamed:@"选择素材" target:self set:nil get:nil
+                                                        detail:[TXPackageListController class]
+                                                          cell:PSLinkCell edit:nil]];
+        [self btn:@"从「文件」App 选择 .tendies" act:@selector(tx_pickFiles:) to:specs];
+        [self btn:@"重新扫描素材目录" act:@selector(tx_rescan:) to:specs];
+
+        // 关于我们（固定：每个插件都相同，照抄即可）
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"关于我们"]];
+        [self btn:@"Sileo 越狱源" act:@selector(openSileoRepo:) to:specs];
+        [self btn:@"TG分享频道" act:@selector(openTelegramChannel:) to:specs];
+        [self btn:@"QQ交流群组" act:@selector(openQQGroup:) to:specs];
+
+        _rows = [specs copy];
+        TXLog(@"面板: 规格构建完成（%lu 行）", (unsigned long)_rows.count);
+    }
+    TXSetSpecifiers(self, _rows);
+    return _rows;
+}
+
+// 通用：往规格列表末尾加一个按钮型 specifier
+- (void)btn:(NSString *)title act:(SEL)action to:(NSMutableArray *)array {
+    PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:title target:self set:nil get:nil
+                                                      detail:nil cell:PSButtonCell edit:nil];
+    spec.buttonAction = action;
+    [array addObject:spec];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    (void)[self specifiers];   // 保证规格已构建并写回，下面才找得到那一行
+    // 「当前素材」是动态值，不能写死在 plist 里：每次出现时刷新这一行
+    PSSpecifier *spec = [self specifierForID:@"currentMaterial"];
+    if (spec) {
+        NSString *path = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
+        NSString *text = [NSString stringWithFormat:@"当前素材：%@",
+                          path.length ? TXDisplayName(path) : @"无"];
+        spec.name = text;
+        [spec setProperty:text forKey:@"label"];
+        [self reloadSpecifier:spec];
+    }
+}
+
+#pragma mark - 开关读写（plist 里写 defaults+key，这里实时读写并落盘）
+
+- (id)readPreferenceValue:(PSSpecifier *)spec {
+    NSString *key = [spec propertyForKey:@"key"];
+    if (!key) {
+        return nil;
+    }
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kDomain];
+    id value = [defaults objectForKey:key];
+    return value ?: [spec propertyForKey:@"default"];
+}
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)spec {
+    NSString *key = [spec propertyForKey:@"key"];
+    if (!key) {
+        return;
+    }
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kDomain];
+    if ([value isKindOfClass:[NSNumber class]]) {
+        NSNumber *number = (NSNumber *)value;
+        if (strcmp([number objCType], @encode(BOOL)) == 0 || strcmp([number objCType], @encode(char)) == 0) {
+            [defaults setBool:[number boolValue] forKey:key];
+        } else {
+            [defaults setDouble:[number doubleValue] forKey:key];
+        }
+    } else {
+        [defaults setObject:value forKey:key];
+    }
+    [defaults synchronize];
+    TXLog(@"面板: %@ = %@", key, value);
+}
+
+#pragma mark - 安装 / 清理（真正的活儿在 SpringBoard 侧 worker）
+
+- (void)tx_installPoster:(id)sender {
+    NSString *path = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
+    if (!path.length) {
+        [self alert:@"先在「选择素材」里选一个 .tendies"];
+        return;
+    }
+    TXLog(@"面板: 请求安装 %@", path);
+    [self startWorkerWith:kInstallNote];
+}
+
+- (void)tx_cleanupDuplicates:(id)sender {
+    TXLog(@"面板: 请求清理重复壁纸");
+    [self startWorkerWith:kCleanupNote];
+}
+
+// 清掉上次的结果 → 发通知 → 轮询 worker 写回的进度
+- (void)startWorkerWith:(NSString *)notification {
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kDomain];
+    [defaults setObject:@"" forKey:@"LastInstallMessage"];
+    [defaults synchronize];
+    [self notify:notification];
+    [self pollResult:0];
+}
+
+- (void)pollResult:(NSUInteger)attempt {
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSString *message = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"LastInstallMessage"];
+        if (!message.length && attempt < 5) {
+            [weakSelf pollResult:attempt + 1];
+            return;
+        }
+        [weakSelf alert:message.length ? message : @"已发出请求，但没等到回复（详情看 TendiesX.log）"];
+    });
+}
+
+- (void)tx_rescan:(id)sender {
+    TXLog(@"面板: 重新扫描素材目录");
+    [self reloadSpecifiers];
+}
+
+#pragma mark - 从「文件」App 导入
+
+- (void)tx_pickFiles:(id)sender {
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = YES;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller
+ didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:kDomain];
+    NSUInteger copied = 0;
+
+    for (NSURL *url in urls) {
+        NSString *name = url.lastPathComponent;
+        if (![[name.pathExtension lowercaseString] isEqualToString:@"tendies"]) {
+            name = [name stringByAppendingPathExtension:@"tendies"];
+        }
+        // 目标与解压目录同名（xxx.tendies）：同名即替换
+        NSString *destination = [kMediaDir stringByAppendingPathComponent:name];
+        [fm removeItemAtPath:destination error:NULL];
+
+        if ([fm copyItemAtURL:url toURL:[NSURL fileURLWithPath:destination] error:NULL]) {
+            copied++;
+            [defaults setObject:destination forKey:@"SourcePath"];   // 直接选中刚放入的
+        } else {
+            TXLog(@"面板: 复制失败 %@", name);
+        }
+    }
+
+    [defaults synchronize];
+    TXLog(@"面板: 已放入素材目录 %lu 个", (unsigned long)copied);
+    [self reloadSpecifiers];
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    TXLog(@"面板: 取消选择文件");
+}
+
+#pragma mark - 小工具
+
+- (void)notify:(NSString *)name {
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         (__bridge CFStringRef)name, NULL, NULL, YES);
+}
+
+- (void)alert:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"TendiesX"
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+#pragma mark - 关于我们（固定：scheme 优先 + 网页兜底，所有插件相同）
+
+- (void)openURL:(NSURL *)primary fallback:(NSURL *)fallback {
+    UIApplication *app = [UIApplication sharedApplication];
+    if (primary) {
+        [app openURL:primary options:@{} completionHandler:^(BOOL success) {
+            if (!success && fallback) {
+                [app openURL:fallback options:@{} completionHandler:nil];
+            }
+        }];
+    } else if (fallback) {
+        [app openURL:fallback options:@{} completionHandler:nil];
+    }
+}
+
+- (void)openSileoRepo {
+    NSString *source = @"https://axs66.github.io/pro";
+    NSString *encoded = [source stringByAddingPercentEncodingWithAllowedCharacters:
+                         [NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"sileo://source/%@", encoded]];
+    if (!url) {
+        url = [NSURL URLWithString:[NSString stringWithFormat:@"sileo://add-source?source=%@", encoded ?: source]];
+    }
+    [self openURL:url fallback:[NSURL URLWithString:source]];
+}
+- (void)openSileoRepo:(id)_ {
+    [self openSileoRepo];
+}
+
+- (void)openTelegramChannel {
+    [self openURL:[NSURL URLWithString:@"tg://resolve?domain=wxfx8"]
+         fallback:[NSURL URLWithString:@"https://t.me/wxfx8"]];
+}
+- (void)openTelegramChannel:(id)_ {
+    [self openTelegramChannel];
+}
+
+- (void)openQQGroup {
+    [self openURL:[NSURL URLWithString:@"mqqapi://card/show_pslcard?src_type=internal&version=1&card_type=group&uin=678055716"]
+         fallback:nil];
+}
+- (void)openQQGroup:(id)_ {
+    [self openQQGroup];
+}
+
+@end
