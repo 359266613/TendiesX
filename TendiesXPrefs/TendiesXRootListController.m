@@ -14,6 +14,7 @@
 #import <objc/runtime.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "TXLogger.h"
+#import "Cells/TXDetailCell.h"
 
 static NSString * const kDomain = @"com.axs.tendiesx";   // 与 control 的 Package 一致
 static NSString * const kMediaDir = @"/var/mobile/Library/TendiesX";
@@ -127,6 +128,7 @@ static NSString *TXDisplayName(NSString *path) {
 @interface TendiesXRootListController () <UIDocumentPickerDelegate>
 - (void)btn:(NSString *)title act:(SEL)action to:(NSMutableArray *)array;
 - (void)fixButtonActions:(NSMutableArray *)specs;
+- (void)refreshMaterialRow;
 - (void)tx_installPoster:(id)sender;
 - (void)tx_cleanupDuplicates:(id)sender;
 - (void)tx_pickFiles:(id)sender;
@@ -204,17 +206,25 @@ static NSString *TXDisplayName(NSString *path) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    (void)[self specifiers];   // 保证规格已构建并写回，下面才找得到那一行
-    // 「当前素材」是动态值，不能写死在 plist 里：每次出现时刷新这一行
-    PSSpecifier *spec = [self specifierForID:@"currentMaterial"];
-    if (spec) {
-        NSString *path = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
-        NSString *text = [NSString stringWithFormat:@"当前素材：%@",
-                          path.length ? TXDisplayName(path) : @"无"];
-        spec.name = text;
-        [spec setProperty:text forKey:@"label"];
-        [self reloadSpecifier:spec];
+    (void)[self specifiers];        // 保证规格已构建并写回，下面才找得到那一行
+    [self refreshMaterialRow];      // 从选择页返回后，右侧的名字要跟着变
+}
+
+/// 「选择素材」这一行：cell 换成 TXDetailCell，右侧显示当前素材名（KeyboardTools 同款做法）
+- (void)refreshMaterialRow {
+    PSSpecifier *spec = [self specifierForID:@"material"];
+    if (!spec) {
+        return;
     }
+    NSString *path = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
+    NSString *name = path.length ? TXDisplayName(path) : @"未选择";
+
+    [spec setProperty:[TXDetailCell class] forKey:@"cellClass"];
+    if ([[spec propertyForKey:@"txDetailText"] isEqualToString:name]) {
+        return;   // 没变就不重画这一行
+    }
+    [spec setProperty:name forKey:@"txDetailText"];
+    [self reloadSpecifier:spec];
 }
 
 #pragma mark - 开关读写（plist 里写 defaults+key，这里实时读写并落盘）
@@ -329,6 +339,7 @@ static NSString *TXDisplayName(NSString *path) {
     [defaults synchronize];
     TXLog(@"面板: 已放入素材目录 %lu 个", (unsigned long)copied);
     [self reloadSpecifiers];
+    [self refreshMaterialRow];   // 右侧那行立刻显示新选中的素材
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {

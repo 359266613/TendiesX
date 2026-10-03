@@ -46,11 +46,13 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSTitleValueCell</string>
+			<string>PSLinkCell</string>
+			<key>detail</key>
+			<string>TXPackageListController</string>
 			<key>id</key>
-			<string>currentMaterial</string>
+			<string>material</string>
 			<key>label</key>
-			<string>当前素材：无</string>
+			<string>选择素材</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -79,16 +81,6 @@
 			<string>tx_cleanupDuplicates:</string>
 			<key>id</key>
 			<string>cleanup</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkCell</string>
-			<key>detail</key>
-			<string>TXPackageListController</string>
-			<key>id</key>
-			<string>material</string>
-			<key>label</key>
-			<string>选择素材</string>
 		</dict>
 		<dict>
 			<key>cell</key>
