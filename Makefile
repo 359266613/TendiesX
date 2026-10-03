@@ -17,6 +17,7 @@ TendiesX_FILES = Hooks/Worker.xm \
 	Sources/TXPreferences.m \
 	Sources/TXZipArchive.m \
 	Sources/TXPosterInstaller.m \
+	Sources/TXPosterDiagnostics.m \
 	Sources/TXPosterService.m
 TendiesX_CFLAGS = -fobjc-arc \
 	-I./Sources \

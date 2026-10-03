@@ -1,5 +1,6 @@
 #import "TXPosterInstaller.h"
 #import "TXZipArchive.h"
+#import "TXPosterDiagnostics.h"
 #import "TXLogger.h"
 #import <UIKit/UIKit.h>
 
@@ -26,6 +27,25 @@ static BOOL TXIsJunkEntry(NSString *name) {
 @property (nonatomic, copy, readwrite) NSString *lastInstalledExtension;
 @property (nonatomic, copy, readwrite) NSArray<NSString *> *lastInstalledDescriptorIdentifiers;
 @end
+
+#pragma mark - 安装清单（只用来清掉"我们自己上次装的"，绝不碰系统自带壁纸）
+
+static NSString *const kTXManifestDomain = @"com.axs.tendiesx";
+static NSString *const kTXManifestKey = @"InstalledDescriptors";
+
+static NSArray<NSDictionary *> *TXInstalledManifest(void) {
+    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)kTXManifestKey,
+                                                       (__bridge CFStringRef)kTXManifestDomain);
+    NSArray *list = value ? (__bridge_transfer NSArray *)value : nil;
+    return [list isKindOfClass:NSArray.class] ? list : @[];
+}
+
+static void TXSaveInstalledManifest(NSArray<NSDictionary *> *manifest) {
+    CFPreferencesSetAppValue((__bridge CFStringRef)kTXManifestKey,
+                             (__bridge CFPropertyListRef)manifest,
+                             (__bridge CFStringRef)kTXManifestDomain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kTXManifestDomain);
+}
 
 /// descriptor 的 identifier 写在 <descriptor>/com.apple.posterkit.provider.descriptor.identifier，
 /// 是纯文本（实测内容就是 "7400"，4 字节、无换行），给 PRSService 建配置时要用。
@@ -288,6 +308,10 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
         return installed;
     }
 
+    // 重复安装改为"替换"：先清掉我们自己上次装的、identifier 相同的副本。
+    // 只认清单里记录过的 UUID —— 系统自带的同 identifier 壁纸绝不碰（那是别人的资产）。
+    NSMutableArray<NSDictionary *> *manifest = [TXInstalledManifest() mutableCopy];
+
     for (NSString *entry in [fm contentsOfDirectoryAtPath:sourceDir error:NULL]) {
         if (TXIsJunkEntry(entry)) {
             continue;
@@ -297,25 +321,50 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
             continue;
         }
 
-        // UUID 随机化：descriptor 内的文件都不引用 UUID（已逐个核对），换名安全，
-        // 且永不与系统已有壁纸撞 UUID。
+        NSString *identifier = TXDescriptorIdentifierIn(src);
+
+        if (identifier.length) {
+            NSMutableArray<NSDictionary *> *keep = [NSMutableArray array];
+            for (NSDictionary *record in manifest) {
+                BOOL sameIdentifier = [record[@"identifier"] isEqualToString:identifier];
+                BOOL sameExtension = [record[@"extension"] isEqualToString:extension];
+                NSString *oldUUID = record[@"uuid"];
+                if (sameIdentifier && sameExtension && oldUUID.length) {
+                    NSString *oldPath = [destRoot stringByAppendingPathComponent:oldUUID];
+                    if (TXIsDirectory(oldPath)) {
+                        [fm removeItemAtPath:oldPath error:NULL];
+                        TXLog(@"[A] 清理上次装的同款 %@（identifier=%@）", oldUUID, identifier);
+                    }
+                } else {
+                    [keep addObject:record];
+                }
+            }
+            [manifest setArray:keep];
+        }
+
+        // UUID 随机化：descriptor 内的文件都不引用 UUID（已逐个核对），换名安全。
         NSString *newUUID = [NSUUID UUID].UUIDString.uppercaseString;
         NSString *dst = [destRoot stringByAppendingPathComponent:newUUID];
 
         NSError *copyError = nil;
         if ([self tx_copyDescriptor:src to:dst error:&copyError]) {
             [installed addObject:dst];
-            NSString *identifier = TXDescriptorIdentifierIn(src);
             if (identifier.length) {
                 [identifiers addObject:identifier];
+                [manifest addObject:@{ @"uuid": newUUID,
+                                       @"identifier": identifier,
+                                       @"extension": extension }];
             }
             TXLog(@"[A] 已安装 descriptor %@ (identifier=%@) -> %@",
                   entry, identifier.length ? identifier : @"(未读到)", newUUID);
         } else {
+            // 失败就删掉残缺目录，免得留下一个半成品让 PosterBoard 收录
+            [fm removeItemAtPath:dst error:NULL];
             TXLog(@"[A] 安装失败 %@: %@", entry, copyError.localizedDescription);
         }
     }
     _lastInstalledDescriptorIdentifiers = [identifiers copy];
+    TXSaveInstalledManifest(manifest);
 
     if (installed.count) {
         TXLog(@"[A] 共 %lu 个 descriptor 安装完成，交给 worker 调 PRSService 让 PosterBoard 重扫",
@@ -324,6 +373,11 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
         // 1) iOS 上没有 system()（SDK 标记 __API_UNAVAILABLE(ios)）；
         // 2) 官方重扫方式是 PRSService -refreshPosterDescriptorsForExtension:，
         //    由 Hooks/Worker.xm 在安装成功后调用，不用重启进程。
+
+        // 对比诊断：我们这份 vs 系统里同 identifier 的那份（最能说明"为什么没动画"）
+        NSString *first = installed.firstObject;
+        [TXPosterDiagnostics compareDescriptorAt:first extension:extension];
+        [TXPosterDiagnostics schedulePostMigrationDump:first delay:8.0];
     } else {
         TXLog(@"[A] 没有安装任何 descriptor（源目录里没有 UUID 子目录？）");
     }
