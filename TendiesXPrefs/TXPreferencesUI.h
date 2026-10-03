@@ -12,13 +12,13 @@
 
 /// PSSpecifier 的 cell 类型
 enum {
-    TXCellGroup      = 0,
-    TXCellLink       = 1,
-    TXCellLinkList   = 2,
-    TXCellTitle      = 4,
-    TXCellSwitch     = 6,
-    TXCellStaticText = 7,
-    TXCellButton     = 13,
+    TXCellGroup      = 0,   // PSGroupCell
+    TXCellLink       = 1,   // PSLinkCell
+    TXCellLinkList   = 2,   // PSLinkListCell（配 PSListItemsController 做选择列表）
+    TXCellTitle      = 4,   // PSTitleValueCell
+    TXCellSwitch     = 6,   // PSSwitchCell
+    TXCellStaticText = 7,   // PSStaticTextCell
+    TXCellButton     = 13,  // PSButtonCell
 };
 
 @interface PSSpecifier : NSObject
@@ -43,6 +43,13 @@ enum {
 @property (nonatomic, retain) PSSpecifier *specifier;
 - (void)reloadSpecifiers;
 - (void)reloadSpecifier:(PSSpecifier *)specifier;
+// 由 PSTableCell 子类回调，读/写规格值；两条路都实现，兼容不同系统版本
+- (id)readPreferenceValue:(PSSpecifier *)specifier;
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier;
+@end
+
+/// 「列表选择」cell 的详情控制器（系统实现）
+@interface PSListItemsController : PSListController
 @end
 
 #endif /* TXPreferencesUI_h */

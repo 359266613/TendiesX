@@ -2,6 +2,7 @@
 #import "TXTendiesPackage.h"
 #import "TXPreferences.h"
 #import "TXLogger.h"
+#import "TXWallpaper.h"
 #import <AVFoundation/AVFoundation.h>
 
 /// 日志用的短路径（只留父目录名/文件名），避免整条绝对路径把日志撑爆
@@ -12,6 +13,28 @@ static NSString *TXShortPath(NSString *path) {
     return [NSString stringWithFormat:@"%@/%@",
             path.stringByDeletingLastPathComponent.lastPathComponent,
             path.lastPathComponent];
+}
+
+// 调整：壁纸视图会被系统反复重建，每次 didMoveToWindow 都可能新建渲染层。
+// 加一级图片缓存，避免同一个包反复解码同一张大图。
+static UIImage *TXLoadCachedImage(NSString *path) {
+    if (!path.length) {
+        return nil;
+    }
+    static NSCache<NSString *, UIImage *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [[NSCache alloc] init];
+        cache.countLimit = 4;
+    });
+    UIImage *image = [cache objectForKey:path];
+    if (!image) {
+        image = [UIImage imageWithContentsOfFile:path];
+        if (image) {
+            [cache setObject:image forKey:path];
+        }
+    }
+    return image;
 }
 
 #pragma mark - 渲染层
@@ -69,7 +92,7 @@ static NSString *TXShortPath(NSString *path) {
 // ca / image 型：暂时显示静态兜底图（.ca 里的 Background 层资源或最大图）
 - (void)tx_setupStaticImage {
     _mode = @"static";
-    UIImage *image = [UIImage imageWithContentsOfFile:_package.fallbackImageURL.path];
+    UIImage *image = TXLoadCachedImage(_package.fallbackImageURL.path);
     _imageView = [[UIImageView alloc] initWithImage:image];
     _imageView.frame = self.bounds;
     _imageView.contentMode = UIViewContentModeScaleAspectFill;
@@ -228,9 +251,11 @@ static NSString *TXShortPath(NSString *path) {
         [renderer addSubview:interaction];
     }
 
-    TXLog(@"已挂载: %@ (%@/%@) -> %@ (bounds=%@)",
+    TXLog(@"已挂载: %@ (%@/%@) -> %@ (variant=%lld bounds=%@)",
           self.activePackage.displayName, self.activePackage.kind, renderer.mode,
-          NSStringFromClass(view.class), NSStringFromCGRect(view.bounds));
+          NSStringFromClass(view.class),
+          (long long)[(PBUIWallpaperView *)view variant],
+          NSStringFromCGRect(view.bounds));
 }
 
 - (void)layoutWallpaperWithView:(UIView *)view {
