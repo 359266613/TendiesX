@@ -7,11 +7,15 @@
 //    /var/mobile/Library/TendiesX/气质美乳女菩萨.tendies/     ← 解压后的素材目录（同名，但是目录）
 //
 //  .tendies 不是 Apple 系统格式，是 Nugget/PosterBoard 的「描述符包」（zip）：
-//    descriptors/<UUID>/ + versions/<n>/contents/...  + Wallpaper.plist / providerInfo.plist
+//    descriptors/<UUID>/versions/<n>/contents/<名字>.wallpaper/
+//        Wallpaper.plist                                  ← 描述文件
+//        <名字>_Background-*.ca / _Floating-*.ca / _Foreground-*.ca   ← 三个 CA 包
 //  实测两种形态：
-//    1) video 型：内含 mp4/mov，可用 AVPlayer 循环播放
-//    2) ca 型   ：内含若干 .ca 包（CoreAnimation CAAML + JS + 图片，**没有视频**），
-//                 目前只能取一张静态兜底图；.ca 真正渲染需要交给 PosterBoard
+//    1) video 型：内含 mp4/mov，用 AVPlayer 循环播放
+//    2) ca 型   ：**没有视频**，动画全在三个 .ca 目录里
+//                 （main.caml = CAAML 图层树 + assets 贴图），
+//                 必须交给系统 CAPackage / BSUICAPackageView 渲染，
+//                 取里面的 png 当静态图只是兜底。
 //
 //  解析不做任何固定目录假设，一律递归扫描后按内容判定类型。
 //
@@ -32,7 +36,11 @@ extern NSString *const TXWallpaperKindUnknown;
 @property (nonatomic, copy,   readonly) NSURL *videoURL;        // 主视频（kind=video）
 @property (nonatomic, copy,   readonly) NSURL *fallbackImageURL;// 静态兜底图（kind=ca/image）
 @property (nonatomic, copy,   readonly) NSDictionary *descriptor; // Wallpaper.plist / providerInfo.plist
-@property (nonatomic, copy,   readonly) NSArray<NSString *> *caBundlePaths; // .ca 包目录
+
+// .ca 目录（CoreAnimation 包，交给 CAPackage 原生渲染）
+@property (nonatomic, copy,   readonly) NSString *backgroundCAPath; // xxx_Background-*.ca
+@property (nonatomic, copy,   readonly) NSString *floatingCAPath;   // xxx_Floating-*.ca
+@property (nonatomic, copy,   readonly) NSString *foregroundCAPath; // xxx_Foreground-*.ca
 
 #pragma mark - 目录与导入
 

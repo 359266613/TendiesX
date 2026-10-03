@@ -51,9 +51,26 @@
 
 %end
 
-#pragma mark - 2. 壁纸变更：重新解析 .tendies
+#pragma mark - 2. 壁纸容器控制器：主挂载点 + 壁纸变更
 
 %hook PBUIWallpaperViewController
+
+// 容器布局完成后把自定义渲染层挂到 _wallpaperContainerView。
+// 这是 Zone 的做法：壁纸视图的 contentView 在 iOS 16 上可能是
+// PBUIFakeBlurView / PBUISnapshotReplicaView 这类副本，挂进去会"松手就消失"。
+- (void)viewDidLayoutSubviews {
+    %orig;
+
+    UIView *container = nil;
+    @try {
+        container = [self valueForKey:@"wallpaperContainerView"];
+    } @catch (NSException *exception) {
+        // KVC 取不到就退回壁纸视图那条路
+    }
+    if (container) {
+        [TXWallpaperManager.sharedManager attachToWallpaperContainerView:container];
+    }
+}
 
 - (void)noteWallpapersDidUpdate {
     %orig;
@@ -110,6 +127,9 @@
     if (!cls) {
         TXLog(@"警告: 本系统没有 PBUIWallpaperView，壁纸 hook 不会生效");
     }
+    TXLog(@"CAPackage = %@ | BSUICAPackageView = %@",
+          objc_getClass("CAPackage") ? @"有" : @"缺失",
+          objc_getClass("BSUICAPackageView") ? @"有" : @"缺失");
 
     // sharedManager 首次访问时内部就会 reloadFromDisk，把偏好与解析结果打进日志
     (void)TXWallpaperManager.sharedManager;

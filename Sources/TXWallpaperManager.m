@@ -3,6 +3,7 @@
 #import "TXPreferences.h"
 #import "TXLogger.h"
 #import "TXWallpaper.h"
+#import "TXCAPackageView.h"
 #import <AVFoundation/AVFoundation.h>
 
 /// 日志用的短路径（只留父目录名/文件名），避免整条绝对路径把日志撑爆
@@ -15,7 +16,17 @@ static NSString *TXShortPath(NSString *path) {
             path.lastPathComponent];
 }
 
-// 调整：壁纸视图会被系统反复重建，每次 didMoveToWindow 都可能新建渲染层。
+/// iOS 16 上壁纸视图的 contentView 经常是「副本」（fake blur / snapshot replica /
+/// portal replica），只在过渡瞬间被合成，落定后就被系统快照取代。
+/// 挂进这些宿主就会表现为「下拉通知中心看得到、松手就消失」。
+static BOOL TXIsReplicaHost(UIView *view) {
+    NSString *name = NSStringFromClass(view.class);
+    return [name containsString:@"FakeBlur"]
+        || [name containsString:@"SnapshotReplica"]
+        || [name containsString:@"PortalReplica"];
+}
+
+// 壁纸视图会被系统反复重建，每次 didMoveToWindow 都可能新建渲染层。
 // 加一级图片缓存，避免同一个包反复解码同一张大图。
 static UIImage *TXLoadCachedImage(NSString *path) {
     if (!path.length) {
@@ -37,7 +48,7 @@ static UIImage *TXLoadCachedImage(NSString *path) {
     return image;
 }
 
-#pragma mark - 渲染层
+#pragma mark - 层级诊断
 
 /// 把一个视图的直接子视图列成一行（带尺寸和 hidden，方便看出"谁盖住谁"）
 static NSString *TXChildDescription(UIView *view) {
@@ -49,7 +60,7 @@ static NSString *TXChildDescription(UIView *view) {
     return desc;
 }
 
-/// 调整：一次性打印壁纸视图及其**父级**的子视图层级。
+/// 一次性打印壁纸视图及其**父级**的子视图层级。
 /// 模糊 / 暗淡 / 快照层一般是壁纸视图的兄弟节点（同容器、在它上面），
 /// 只看壁纸视图自己的子视图是查不出"被谁盖住"的。
 static void TXDumpHierarchyOnce(UIView *view) {
@@ -65,7 +76,8 @@ static void TXDumpHierarchyOnce(UIView *view) {
     }
     [dumped addObject:key];
 
-    UIView *content = [(PBUIWallpaperView *)view contentView];
+    UIView *content = [view isKindOfClass:PBUIWallpaperView.class]
+        ? [(PBUIWallpaperView *)view contentView] : nil;
     UIView *parent = view.superview;
     TXLog(@"层级 %@: contentView=%@", key,
           content ? NSStringFromClass(content.class) : @"(无)");
@@ -75,8 +87,12 @@ static void TXDumpHierarchyOnce(UIView *view) {
           parent ? TXChildDescription(parent) : @"");
 }
 
-/// 渲染层：video 型走 AVPlayerLooper 循环播放；ca / image 型先退化成静态兜底图，
-/// 保证「挂载链路」可见可用，后续再接 CoreAnimation(.ca/CAAML) 渲染。
+#pragma mark - 渲染层
+
+/// 渲染层：
+///   video 型 → AVQueuePlayer + AVPlayerLooper 循环播放
+///   ca 型    → 三层 .ca 各自交给系统 CAPackage / BSUICAPackageView 原生渲染
+///   image 型 → 静态图兜底
 @interface TXWallpaperRenderer : UIView
 @property (nonatomic, strong) TXTendiesPackage *package;
 @property (nonatomic, weak)   UIView *host;      // 实际承载的父视图
@@ -84,6 +100,7 @@ static void TXDumpHierarchyOnce(UIView *view) {
 @property (nonatomic, strong) AVPlayerLooper *looper;
 @property (nonatomic, strong) AVPlayerLayer *playerLayer;
 @property (nonatomic, strong) UIImageView *imageView;
+@property (nonatomic, strong) NSMutableArray<TXCAPackageView *> *caViews;
 @property (nonatomic, copy)   NSString *mode;
 - (void)tx_start;
 - (void)tx_pause;
@@ -98,20 +115,24 @@ static void TXDumpHierarchyOnce(UIView *view) {
         self.backgroundColor = UIColor.blackColor;
         self.clipsToBounds = YES;
         self.userInteractionEnabled = YES;
+        _caViews = [NSMutableArray array];
 
         if (package.videoURL) {
             [self tx_setupVideo];
-        } else if (package.fallbackImageURL) {
-            [self tx_setupStaticImage];
+        } else if ([self tx_setupCoreAnimation]) {
+            // 成功走 CA 包渲染
+        } else if ([self tx_setupStaticImage]) {
+            // 退回静态兜底
         } else {
             _mode = @"empty";
-            TXLog(@"渲染层: 无可渲染内容（既无视频也无图片）");
+            TXLog(@"渲染层: 无可渲染内容（无视频 / 无 .ca / 无图片）");
         }
     }
     return self;
 }
 
-// 视频型：AVQueuePlayer + AVPlayerLooper 无缝循环
+#pragma mark video
+
 - (void)tx_setupVideo {
     _mode = @"video";
     AVPlayerItem *item = [AVPlayerItem playerItemWithURL:_package.videoURL];
@@ -126,8 +147,45 @@ static void TXDumpHierarchyOnce(UIView *view) {
     TXLog(@"渲染层: video 模式 video=%@", _package.videoURL.lastPathComponent);
 }
 
-// ca / image 型：暂时显示静态兜底图（.ca 里的 Background 层资源或最大图）
-- (void)tx_setupStaticImage {
+#pragma mark CoreAnimation（.ca）
+
+// 三层叠放语义（Apple 海报）：Background 最底 → Floating（主体）→ Foreground 最上
+- (BOOL)tx_setupCoreAnimation {
+    NSArray<NSString *> *paths = @[
+        _package.backgroundCAPath ?: @"",
+        _package.floatingCAPath ?: @"",
+        _package.foregroundCAPath ?: @"",
+    ];
+
+    for (NSString *path in paths) {
+        if (!path.length) {
+            continue;
+        }
+        TXCAPackageView *caView = [[TXCAPackageView alloc] initWithCAPackagePath:path];
+        if (!caView.loaded) {
+            TXLog(@"渲染层: 该层加载失败，跳过 %@", path.lastPathComponent);
+            continue;
+        }
+        caView.frame = self.bounds;
+        caView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [self addSubview:caView];
+        [_caViews addObject:caView];
+    }
+
+    if (!_caViews.count) {
+        return NO;
+    }
+    _mode = [NSString stringWithFormat:@"ca(%lu层)", (unsigned long)_caViews.count];
+    TXLog(@"渲染层: %@ 模式（系统 CAPackage 原生渲染）", _mode);
+    return YES;
+}
+
+#pragma mark 静态兜底
+
+- (BOOL)tx_setupStaticImage {
+    if (!_package.fallbackImageURL) {
+        return NO;
+    }
     _mode = @"static";
     UIImage *image = TXLoadCachedImage(_package.fallbackImageURL.path);
     _imageView = [[UIImageView alloc] initWithImage:image];
@@ -136,19 +194,30 @@ static void TXDumpHierarchyOnce(UIView *view) {
     _imageView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self addSubview:_imageView];
 
-    TXLog(@"渲染层: static 兜底模式 kind=%@ image=%@ (%@)，.ca 渲染待接入",
+    TXLog(@"渲染层: static 兜底模式 kind=%@ image=%@ (%@)",
           _package.kind, _package.fallbackImageURL.lastPathComponent,
           image ? @"已加载" : @"解码失败");
+    return YES;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     self.playerLayer.frame = self.bounds;
     self.imageView.frame = self.bounds;
+    for (TXCAPackageView *caView in _caViews) {
+        caView.frame = self.bounds;
+    }
 }
 
-- (void)tx_start { [self.player play];  }
-- (void)tx_pause { [self.player pause]; }
+// CA 动画没有播放/暂停的概念，这里用 layer.speed 整棵子树一起停
+- (void)tx_start {
+    self.layer.speed = 1.0;
+    [self.player play];
+}
+- (void)tx_pause {
+    self.layer.speed = 0.0;
+    [self.player pause];
+}
 
 @end
 
@@ -176,6 +245,8 @@ static void TXDumpHierarchyOnce(UIView *view) {
 @interface TXWallpaperManager ()
 @property (nonatomic, strong) NSMapTable<UIView *, TXWallpaperRenderer *> *renderers;
 @property (nonatomic, strong, readwrite) TXTendiesPackage *activePackage;
+/// 已经挂上容器级渲染层的那个容器；存在时不再往壁纸视图里重复挂
+@property (nonatomic, weak) UIView *containerHost;
 @end
 
 @implementation TXWallpaperManager
@@ -195,7 +266,6 @@ static void TXDumpHierarchyOnce(UIView *view) {
     self = [super init];
     if (self) {
         _renderers = [NSMapTable weakToStrongObjectsMapTable];
-        // 设置面板改完偏好会发 Darwin 通知 -> TXPreferences 广播本通知 -> 这里重载
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(tx_preferencesDidReload)
                                                      name:@"TXPreferencesDidReload"
@@ -212,18 +282,16 @@ static void TXDumpHierarchyOnce(UIView *view) {
 }
 
 - (void)reloadFromDisk {
-    // 调整：先把投放目录里的 .tendies 导入（解压到素材库并删掉源文件）。
-    // 这样用 Filza 丢进目录的素材，重载一次就变成可用壁纸，目录里不留 .tendies 原文件。
+    // 先把投放目录里的 .tendies 导入（解压成同名目录并删掉压缩包）
     NSDictionary<NSString *, NSString *> *imported =
         [TXTendiesPackage importPendingPackagesWithSourceRemoval:YES];
 
     TXPreferences *prefs = TXPreferences.sharedInstance;
     NSString *path = prefs.activePackagePath;
 
-    // 当前选中的正好是刚被导入的 .tendies（源文件已删）→ 改指到素材库目录
     NSString *remapped = path.length ? imported[path] : nil;
     if (remapped.length) {
-        TXLog(@"当前壁纸已导入，改指素材库: %@", TXShortPath(remapped));
+        TXLog(@"当前壁纸已导入，改指素材目录: %@", TXShortPath(remapped));
         [prefs updateActivePackagePath:remapped];
         path = remapped;
     }
@@ -242,10 +310,29 @@ static void TXDumpHierarchyOnce(UIView *view) {
               ? [NSString stringWithFormat:@"%@(%@)", self.activePackage.displayName, self.activePackage.kind]
               : @"未解析出可用壁纸");
 
-    NSArray<UIView *> *views = self.renderers.keyEnumerator.allObjects;
-    for (UIView *view in views) {
+    for (UIView *view in self.renderers.keyEnumerator.allObjects) {
         [self attachToWallpaperView:view];
     }
+}
+
+#pragma mark - 挂载
+
+/// 参考 Zone 的做法：挂到 PBUIWallpaperViewController 的 _wallpaperContainerView。
+/// 这个容器才是「主壁纸容器」；壁纸视图自己的 contentView 在 iOS 16 上经常是副本。
+- (void)attachToWallpaperContainerView:(UIView *)container {
+    if (!container) {
+        return;
+    }
+    // 容器的父级如果是副本，说明不是主容器
+    if (TXIsReplicaHost(container)) {
+        return;
+    }
+    if (self.containerHost != container) {
+        self.containerHost = container;
+        TXLog(@"主壁纸容器 = %@ (bounds=%@)", NSStringFromClass(container.class),
+              NSStringFromCGRect(container.bounds));
+    }
+    [self attachToWallpaperView:container];
 }
 
 - (void)attachToWallpaperView:(UIView *)view {
@@ -253,9 +340,14 @@ static void TXDumpHierarchyOnce(UIView *view) {
         return;
     }
 
+    // 已经有容器级渲染层时不再往壁纸视图（副本）里重复挂，避免重复解码
+    if (self.containerHost && view != self.containerHost) {
+        return;
+    }
+
     TXWallpaperRenderer *existing = [self.renderers objectForKey:view];
 
-    // 调整：didMoveToWindow 会高频触发（切页/转屏都会走）。
+    // didMoveToWindow 会高频触发（切页/转屏都会走）。
     // 同一视图已挂着同一个包时直接复用，不重建 —— 重建会重新解码图片、
     // 让视频从头播放，表现为闪烁 + 反复解大图。
     if (existing && existing.package && self.activePackage
@@ -263,6 +355,7 @@ static void TXDumpHierarchyOnce(UIView *view) {
         UIView *host = existing.host ?: view;
         existing.frame = host.bounds;
         [existing tx_start];
+        [host bringSubviewToFront:existing];
         return;
     }
 
@@ -281,13 +374,17 @@ static void TXDumpHierarchyOnce(UIView *view) {
         return;
     }
 
-    // 调整：优先挂进系统自己的 contentView（系统原图所在的那层），这样系统的
-    // 模糊 / 暗淡 / legibility 处理会一并作用在我们的内容上，层级也更稳；
-    // 没有 contentView 时退回挂到壁纸视图本身。
+    // 宿主选择：容器本身直接用；壁纸视图则挂进它的 contentView
     UIView *host = view;
-    UIView *content = [(PBUIWallpaperView *)view contentView];
-    if (content) {
-        host = content;
+    if ([view isKindOfClass:PBUIWallpaperView.class]) {
+        UIView *content = [(PBUIWallpaperView *)view contentView];
+        if (content) {
+            host = content;
+        }
+    }
+    if (TXIsReplicaHost(host)) {
+        TXLog(@"警告: 宿主的父级是「副本」%@，内容可能在过渡结束后被系统快照替代",
+              NSStringFromClass(host.superview.class));
     }
 
     TXDumpHierarchyOnce(view);
@@ -297,6 +394,8 @@ static void TXDumpHierarchyOnce(UIView *view) {
     renderer.frame = host.bounds;
     renderer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [host addSubview:renderer];
+    // 容器里还有系统自己的壁纸视图，必须提到最上面，否则被盖住
+    [host bringSubviewToFront:renderer];
     [self.renderers setObject:renderer forKey:view];
     [renderer tx_start];
 
@@ -307,11 +406,12 @@ static void TXDumpHierarchyOnce(UIView *view) {
         [renderer addSubview:interaction];
     }
 
+    long long variant = [view respondsToSelector:@selector(variant)]
+        ? [(PBUIWallpaperView *)view variant] : -1;
     TXLog(@"已挂载: %@ (%@/%@) -> %@ @ %@ (variant=%lld bounds=%@)",
           self.activePackage.displayName, self.activePackage.kind, renderer.mode,
           NSStringFromClass(view.class), NSStringFromClass(host.class),
-          (long long)[(PBUIWallpaperView *)view variant],
-          NSStringFromCGRect(host.bounds));
+          variant, NSStringFromCGRect(host.bounds));
 }
 
 - (void)layoutWallpaperWithView:(UIView *)view {
@@ -321,6 +421,8 @@ static void TXDumpHierarchyOnce(UIView *view) {
     }
     renderer.frame = view.bounds;
     [renderer setNeedsLayout];
+    // 系统会在这期间重建子视图顺序，每次布局都把我们提回最上面
+    [view bringSubviewToFront:renderer];
 }
 
 - (void)pauseWallpaperWithView:(UIView *)view {
@@ -338,7 +440,7 @@ static void TXDumpHierarchyOnce(UIView *view) {
 
 - (void)setLockScreenActive:(BOOL)active {
     TXLog(@"锁屏激活 = %d", active);
-    // TODO: 锁屏激活时可降低帧率 / 暂停，避免与面容、息屏显示互相抢占
+    // TODO: 锁屏激活时降低帧率 / 暂停，避免与面容、息屏显示互相抢占
 }
 
 - (void)handleEvent:(UIEvent *)event {

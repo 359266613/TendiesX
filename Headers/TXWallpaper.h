@@ -71,4 +71,30 @@
 + (instancetype)sharedInstance;
 @end
 
+#pragma mark - CoreAnimation Package（.ca 原生渲染的关键）
+
+//  .tendies 解压后的 <名字>.wallpaper/ 里有三个 .ca 目录：
+//    xxx_Background-*.ca / xxx_Floating-*.ca / xxx_Foreground-*.ca
+//  每个 .ca 目录整体就是一个 CoreAnimation 包（main.caml = CAAML 图层树 + assets/*.png|jpg），
+//  系统自带加载/渲染能力，不需要我们自己解析 main.caml。
+//
+//  CAPackage（QuartzCore）用协议声明而不是 @interface，避免与 SDK 头重复定义冲突。
+//  真实类通过 NSClassFromString(@"CAPackage") 取，走运行时。
+@protocol TXCAPackage <NSObject>
+- (id)initWithContentsOfURL:(NSURL *)url
+  publishedObjectViewClassMap:(NSDictionary *)map;
+- (id)publishedObjectWithName:(NSString *)name;
+- (CALayer *)rootLayer;
+@end
+
+/// BaseBoardUI 里的 CA 包视图 —— SpringBoard 自己渲染 .ca 用的就是它
+@interface BSUICAPackageView : UIView
+- (void)setPackage:(id)package;
+- (void)setState:(NSString *)state;
+- (void)setState:(NSString *)state animated:(BOOL)animated;
+- (void)setState:(NSString *)state ofLayer:(CALayer *)layer transitionSpeed:(double)speed;
+- (void)setStateController:(id)controller;
+- (void)setStatesData:(id)statesData;
+@end
+
 #endif /* TXWallpaper_h */

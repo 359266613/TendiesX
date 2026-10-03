@@ -67,7 +67,9 @@ static NSString *TXStorageDirectoryPath(void) {
 @property (nonatomic, copy, readwrite) NSURL *videoURL;
 @property (nonatomic, copy, readwrite) NSURL *fallbackImageURL;
 @property (nonatomic, copy, readwrite) NSDictionary *descriptor;
-@property (nonatomic, copy, readwrite) NSArray<NSString *> *caBundlePaths;
+@property (nonatomic, copy, readwrite) NSString *backgroundCAPath;
+@property (nonatomic, copy, readwrite) NSString *floatingCAPath;
+@property (nonatomic, copy, readwrite) NSString *foregroundCAPath;
 @end
 
 @implementation TXTendiesPackage
@@ -182,7 +184,6 @@ static NSString *TXStorageDirectoryPath(void) {
         _path = [path copy];
         _kind = TXWallpaperKindUnknown;
         _descriptor = @{};
-        _caBundlePaths = @[];
 
         if (!TXIsDirectoryAtPath(_path)) {
             TXLog(@"不是有效的素材目录: %@", _path);
@@ -225,6 +226,17 @@ static NSString *TXStorageDirectoryPath(void) {
         if (isDir) {
             if ([ext isEqualToString:@"ca"]) {
                 caCount++;
+                // 按目录名判定角色（xxx_Background-*.ca / xxx_Floating-*.ca / xxx_Foreground-*.ca）
+                NSString *lower = item.lowercaseString;
+                if ([lower containsString:@"background"]) {
+                    _backgroundCAPath = _backgroundCAPath ?: full;
+                } else if ([lower containsString:@"floating"]) {
+                    _floatingCAPath = _floatingCAPath ?: full;
+                } else if ([lower containsString:@"foreground"]) {
+                    _foregroundCAPath = _foregroundCAPath ?: full;
+                } else {
+                    _backgroundCAPath = _backgroundCAPath ?: full;   // 没名字的当背景用
+                }
             } else if (!wallpaperDir && [ext isEqualToString:@"wallpaper"]) {
                 wallpaperDir = full;
             }
@@ -283,10 +295,13 @@ static NSString *TXStorageDirectoryPath(void) {
     }
     _displayName = TXTrimmedName(name);
 
-    TXLog(@"解析成功: name=%@ kind=%@ video=%@ fallbackImage=%@",
+    TXLog(@"解析成功: name=%@ kind=%@ video=%@ 兜底图=%@ CA层[bg=%@ float=%@ fg=%@]",
           _displayName, _kind,
           _videoURL.lastPathComponent ?: @"(无)",
-          _fallbackImageURL.lastPathComponent ?: @"(无)");
+          _fallbackImageURL.lastPathComponent ?: @"(无)",
+          _backgroundCAPath.lastPathComponent ?: @"-",
+          _floatingCAPath.lastPathComponent ?: @"-",
+          _foregroundCAPath.lastPathComponent ?: @"-");
     return YES;
 }
 

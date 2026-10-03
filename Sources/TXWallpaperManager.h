@@ -19,6 +19,11 @@
 
 #pragma mark - 由 Hook 调用
 
+/// 主挂载点：PBUIWallpaperViewController 的 _wallpaperContainerView。
+/// 壁纸视图自己的 contentView 在 iOS 16 上经常是「副本」
+/// （PBUIFakeBlurView / PBUISnapshotReplicaView），挂进去会"松手就消失"。
+- (void)attachToWallpaperContainerView:(UIView *)container;
+
 - (void)attachToWallpaperView:(UIView *)view;   // 挂载渲染层（已挂载会先卸载）
 - (void)layoutWallpaperWithView:(UIView *)view; // 尺寸变化
 - (void)pauseWallpaperWithView:(UIView *)view;

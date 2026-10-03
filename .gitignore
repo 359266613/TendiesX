@@ -25,3 +25,6 @@ TendiesX.log*
 
 # 壁纸素材（几十 MB 的二进制，不进仓库；要随包分发请放 layout/ 下）
 *.tendies
+
+# 参考插件解包产物（逆向分析用，不进仓库）
+Reference/iosdump/
