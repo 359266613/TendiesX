@@ -11,7 +11,7 @@
 #import "TXPosterStoreProbe.h"
 #import <objc/runtime.h>
 
-#pragma mark - 1. 壁纸视图：挂载 / 布局 / 前后台生命周期
+#pragma mark - 1. 壁纸视图：挂载 / 布局 / 显隐 / 前后台生命周期
 
 %hook PBUIWallpaperView
 
@@ -25,6 +25,16 @@
 - (void)layoutSubviews {
     %orig;
     [TXWallpaperManager.sharedManager layoutWallpaperWithView:self];
+}
+
+// 诊断用：下拉通知中心 / 上滑多任务时，系统可能会隐藏壁纸视图，
+// 这就是「壁纸闪一下就没」的原因。打出来才能确认。
+- (void)setHidden:(BOOL)hidden {
+    %orig;
+    if (hidden) {
+        TXLog(@"hook: %@ setHidden=%d (variant=%lld)", NSStringFromClass(self.class), hidden,
+              (long long)self.variant);
+    }
 }
 
 - (void)prepareToAppear {

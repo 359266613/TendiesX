@@ -2,7 +2,7 @@
 #import "TXLogger.h"
 
 /// 单次探测输出的行数上限，避免把日志刷爆
-static const NSUInteger kTXProbeLineBudget = 120;
+static const NSUInteger kTXProbeLineBudget = 220;
 
 /// 猜测的固定路径（iOS 16.5 实测都不存在，留着以后版本验证）
 static NSString *const kTXProbeFixedPaths[] = {
@@ -101,8 +101,9 @@ static void TXProbeAppContainers(NSUInteger *budget) {
             }
             TXLog(@"    [命中] %@ -> %@", identifier, container);
             (*budget)--;
-            // 打印它的 Library 一层，找海报存储子目录
-            TXProbeDump([container stringByAppendingPathComponent:@"Library"], 3, 2, budget);
+            // 调整：之前写成 depth=3 / maxDepth=2，条件 depth>=maxDepth 直接返回，
+            // 结果只打了一行 "Library/"。改成从 depth=1 起、最多recursion 3 层。
+            TXProbeDump([container stringByAppendingPathComponent:@"Library"], 1, 3, budget);
         }
     }
 }

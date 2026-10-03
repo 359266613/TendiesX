@@ -3,14 +3,14 @@
 //  设置面板：写 com.axs.tendiesx 偏好，并广播 Darwin 通知让 SpringBoard 侧重载。
 //  扫描目录：/var/mobile/Library/TendiesX/ 与 /var/mobile/Media/TendiesX/
 //
-//  设计要点（踩过的坑）：
-//  - 必须把 specifiers 写回 PSListController 的 _specifiers 实例变量，否则面板全白；
-//  - 开关值的读 / 写同时实现「specifier 的 get/set 选择器」与「控制器级
-//    readPreferenceValue: / setPreferenceValue:specifier:」两条路，兼容各版本；
-//  - 切换开关时**不要**重建 specifiers（会让 PSListController 正在处理的点击回弹，
-//    表现为「开关自己关掉」）；只在 viewWillAppear 里重建一次以刷新标题；
-//  - 选择列表用 PSLinkListCell + PSListItemsController（系统标准做法），
-//    不要自建二级页 + PSButtonCell。
+//  设计要点（踩过的坑，勿改回去）：
+//  1. 必须把 specifiers 写回 PSListController 的 _specifiers 实例变量，否则面板全白；
+//  2. 开关值同时实现「specifier 的 get/set 选择器」与控制器级
+//     readPreferenceValue: / setPreferenceValue:specifier: 两条路；
+//  3. 切换开关时**不要**重建 specifiers（会让正在处理的点击回弹，表现为开关自己关掉）；
+//  4. **不要用 PSListItemsController + set:/get:** —— 它在 prepareSpecifiersMetadata 里会
+//      拿到非字符串的选择器值并抛 unrecognized selector，直接把设置 App 干崩（已实测）。
+//      壁纸选择改为自建二级页 + 自己实现 didSelectRowAtIndexPath。
 //
 
 #import "TXPreferencesUI.h"
@@ -24,14 +24,14 @@ static NSString *const kTXTendiesDirs[] = {
     @"/var/mobile/Media/TendiesX",
     nil
 };
-/// 「自动」选项在列表里对应的值（空串 = 让 Tweak 自动发现）
+/// 「自动」选项对应的值（空串 = 让 Tweak 自动发现）
 static NSString *const kTXAutoValue = @"";
+static NSString *const kTXAutoTitle = @"自动（扫描到的第一个）";
 
 #pragma mark - specifiers 写回（面板白屏的关键）
 
 /// PSListController 的表数据源读的是它自己的 `_specifiers` 实例变量。
 /// 只 `return` 数组而不写回该 ivar 时，日志能看到 specifiers 已构建，但界面全白。
-/// 这里用运行期取 ivar 写入，避免为拿偏移而引入整套 Preferences 私有头。
 static void TXAssignSpecifiers(PSListController *controller, NSArray *specifiers) {
     static Ivar ivar = NULL;
     if (!ivar) {
@@ -96,6 +96,96 @@ static NSArray<NSString *> *TXScanPackages(void) {
     return found;
 }
 
+#pragma mark - 壁纸列表（自建二级页）
+
+static NSArray *gTXPackageSpecifiers = nil;
+static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一一对应
+
+@interface TXPackageListController : PSListController
+@end
+
+@implementation TXPackageListController
+
+- (NSArray *)specifiers {
+    if (!gTXPackageSpecifiers) {
+        TXLog(@"面板: 开始构建壁纸列表");
+        NSMutableArray *specs = [NSMutableArray array];
+        NSMutableArray<NSString *> *paths = [NSMutableArray array];
+
+        NSString *current = TXPrefGet(@"ActivePackagePath");
+        NSArray<NSString *> *packages = TXScanPackages();
+
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"点一下即可切换"]];
+
+        for (NSString *path in packages) {
+            BOOL selected = [path isEqualToString:current];
+            // 用普通行 + 自己接管 didSelectRowAtIndexPath：
+            // 不依赖 PSButtonCell 的 buttonAction 内部行为，也不碰 PSListItemsController。
+            PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:
+                                 [NSString stringWithFormat:@"%@%@", selected ? @"✓ " : @"", TXDisplayName(path)]
+                                                              target:nil set:nil get:nil detail:nil
+                                                                cell:TXCellTitle edit:nil];
+            [specs addObject:spec];
+            [paths addObject:path];
+        }
+
+        [specs addObject:[PSSpecifier groupSpecifierWithName:@"其它"]];
+
+        PSSpecifier *autoSpec = [PSSpecifier preferenceSpecifierNamed:
+                                 [NSString stringWithFormat:@"%@%@",
+                                  (!current.length ? @"✓ " : @""), kTXAutoTitle]
+                                                              target:nil set:nil get:nil detail:nil
+                                                                cell:TXCellTitle edit:nil];
+        [specs addObject:autoSpec];
+
+        gTXPackagePaths = [paths copy];
+        gTXPackageSpecifiers = [specs copy];
+        TXLog(@"面板: 壁纸列表构建完成，%lu 个壁纸", (unsigned long)paths.count);
+    }
+    TXAssignSpecifiers(self, gTXPackageSpecifiers);
+    return gTXPackageSpecifiers;
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"选择壁纸";
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    gTXPackageSpecifiers = nil;
+    gTXPackagePaths = nil;
+    [self reloadSpecifiers];
+}
+
+// 自己接管点击：section 0 的行按顺序对应 gTXPackagePaths，section 1 只有「自动」
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+    NSString *path = nil;
+    if (indexPath.section == 0) {
+        if (indexPath.row < (NSInteger)gTXPackagePaths.count) {
+            path = gTXPackagePaths[indexPath.row];
+        }
+    } else {
+        path = kTXAutoValue;
+    }
+
+    if (path == nil) {
+        return;
+    }
+
+    TXPrefSet(@"ActivePackagePath", path);
+    TXLog(@"面板: ActivePackagePath -> %@", path.length ? path : @"(自动)");
+
+    // 不自动返回：留在列表里把 ✓ 刷出来，用户能看到确实切过去了
+    gTXPackageSpecifiers = nil;
+    gTXPackagePaths = nil;
+    [self reloadSpecifiers];
+}
+
+@end
+
 #pragma mark - 根页面
 
 static NSArray *gTXRootSpecifiers = nil;
@@ -125,44 +215,20 @@ static NSArray *gTXRootSpecifiers = nil;
 
         #pragma mark 开关
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"开关"]];
-        [self tx_switchNamed:@"启用"     key:@"Enabled"            to:specs];
-        [self tx_switchNamed:@"触摸交互" key:@"InteractionEnabled" to:specs];
-        [self tx_switchNamed:@"陀螺仪视差" key:@"ParallaxEnabled"   to:specs];
+        [self tx_switchNamed:@"启用"       key:@"Enabled"            to:specs];
+        [self tx_switchNamed:@"触摸交互"   key:@"InteractionEnabled" to:specs];
+        [self tx_switchNamed:@"陀螺仪视差" key:@"ParallaxEnabled"    to:specs];
 
-        #pragma mark 壁纸选择（PSLinkListCell + PSListItemsController）
+        #pragma mark 壁纸（二级页）
         [specs addObject:[PSSpecifier groupSpecifierWithName:@"壁纸"]];
-
         NSString *current = TXPrefGet(@"ActivePackagePath");
-        NSArray<NSString *> *packages = TXScanPackages();
-
-        NSMutableArray<NSString *> *titles = [NSMutableArray arrayWithObject:@"自动（扫描到的第一个）"];
-        NSMutableArray<NSString *> *values = [NSMutableArray arrayWithObject:kTXAutoValue];
-        for (NSString *path in packages) {
-            [titles addObject:TXDisplayName(path)];
-            [values addObject:path];
-        }
-
-        Class listItemsClass = NSClassFromString(@"PSListItemsController");
-        if (!listItemsClass) {
-            TXLog(@"面板: 警告 —— 找不到 PSListItemsController，壁纸选择将不可用");
-        }
-
         PSSpecifier *picker = [PSSpecifier preferenceSpecifierNamed:
-                               [NSString stringWithFormat:@"当前壁纸：%@",
+                               [NSString stringWithFormat:@"选择壁纸（当前：%@）",
                                 current.length ? TXDisplayName(current) : @"自动"]
-                                                             target:self
-                                                                set:@selector(tx_setActivePackagePath:specifier:)
-                                                                get:@selector(tx_getActivePackagePath:)
-                                                             detail:listItemsClass
-                                                               cell:TXCellLinkList
-                                                               edit:nil];
-        // 两套键名都设上：不同版本 PSListItemsController 读的不一样
-        [picker setProperty:titles forKey:@"titles"];
-        [picker setProperty:values forKey:@"values"];
-        [picker setProperty:titles forKey:@"validTitles"];
-        [picker setProperty:values forKey:@"validValues"];
+                                                             target:nil set:nil get:nil
+                                                           detail:[TXPackageListController class]
+                                                             cell:TXCellLink edit:nil];
         [specs addObject:picker];
-
         [self tx_buttonNamed:@"重新扫描目录" action:@selector(tx_rescan:) to:specs];
 
         #pragma mark 说明
@@ -181,8 +247,7 @@ static NSArray *gTXRootSpecifiers = nil;
         [self tx_buttonNamed:@"QQ交流群组"  action:@selector(openQQGroup:) to:specs];
 
         gTXRootSpecifiers = [specs copy];
-        TXLog(@"面板: 根 specifiers 构建完成，%lu 个（扫描到 %lu 个壁纸）",
-              (unsigned long)gTXRootSpecifiers.count, (unsigned long)packages.count);
+        TXLog(@"面板: 根 specifiers 构建完成，%lu 个", (unsigned long)gTXRootSpecifiers.count);
     }
     TXAssignSpecifiers(self, gTXRootSpecifiers);
     return gTXRootSpecifiers;
@@ -216,17 +281,20 @@ static NSArray *gTXRootSpecifiers = nil;
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    // 调整：只在这里重建一次（刷新「当前壁纸」标题），
-    // 切开关时不重建 —— 否则正在处理的点击会被新数组回弹，表现为开关自己关掉。
     gTXRootSpecifiers = nil;
     [self reloadSpecifiers];
 }
 
 - (void)tx_rescan:(PSSpecifier *)specifier {
     gTXRootSpecifiers = nil;
+    gTXPackageSpecifiers = nil;
+    gTXPackagePaths = nil;
     [self reloadSpecifiers];
     TXLog(@"面板: 重新扫描目录完成");
 }
+
+// 「重新扫描目录」等按钮走这里（按钮 cell 的 action 会带 specifier 参数）
+- (void)tx_rescan { [self tx_rescan:nil]; }
 
 #pragma mark - 开关读写（get/set 选择器 + 控制器级读写，两条路都覆盖）
 
@@ -247,18 +315,6 @@ static NSArray *gTXRootSpecifiers = nil;
     TXLog(@"面板: %@ -> %@", key, value);
 }
 
-#pragma mark - 壁纸选择读写
-
-- (id)tx_getActivePackagePath:(PSSpecifier *)specifier {
-    return TXPrefGet(@"ActivePackagePath") ?: kTXAutoValue;
-}
-
-- (void)tx_setActivePackagePath:(id)value specifier:(PSSpecifier *)specifier {
-    NSString *path = [value isKindOfClass:NSString.class] ? value : kTXAutoValue;
-    TXPrefSet(@"ActivePackagePath", path);
-    TXLog(@"面板: ActivePackagePath -> %@", path.length ? path : @"(自动)");
-}
-
 #pragma mark - 控制器级读写（部分版本的 cell 走这两条）
 
 - (id)readPreferenceValue:(PSSpecifier *)specifier {
@@ -267,7 +323,11 @@ static NSArray *gTXRootSpecifiers = nil;
         return nil;
     }
     id value = TXPrefGet(key);
-    return value ?: @YES;
+    if (value) {
+        return value;
+    }
+    // 开关类没写过时默认开
+    return [specifier propertyForKey:@"default"] ?: @YES;
 }
 
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {

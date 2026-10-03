@@ -39,10 +39,36 @@ static UIImage *TXLoadCachedImage(NSString *path) {
 
 #pragma mark - 渲染层
 
+/// 调整：一次性打印壁纸视图的子视图层级，用于判断我们的渲染层是否被系统层盖住
+/// （下拉通知中心 / 上滑多任务时壁纸闪一下就没，需要先看清谁在上层）
+static void TXDumpHierarchyOnce(UIView *view) {
+    static NSMutableSet<NSString *> *dumped;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dumped = [NSMutableSet set];
+    });
+
+    NSString *key = NSStringFromClass(view.class);
+    if ([dumped containsObject:key]) {
+        return;
+    }
+    [dumped addObject:key];
+
+    NSMutableString *desc = [NSMutableString string];
+    for (UIView *sub in view.subviews) {
+        [desc appendFormat:@"%@(%.0fx%.0f) ", NSStringFromClass(sub.class),
+                            sub.bounds.size.width, sub.bounds.size.height];
+    }
+    UIView *content = [(PBUIWallpaperView *)view contentView];
+    TXLog(@"层级 %@: contentView=%@ | 子视图=[%@]",
+          key, content ? NSStringFromClass(content.class) : @"(无)", desc);
+}
+
 /// 渲染层：video 型走 AVPlayerLooper 循环播放；ca / image 型先退化成静态兜底图，
 /// 保证「挂载链路」可见可用，后续再接 CoreAnimation(.ca/CAAML) 渲染。
 @interface TXWallpaperRenderer : UIView
 @property (nonatomic, strong) TXTendiesPackage *package;
+@property (nonatomic, weak)   UIView *host;      // 实际承载的父视图
 @property (nonatomic, strong) AVQueuePlayer *player;
 @property (nonatomic, strong) AVPlayerLooper *looper;
 @property (nonatomic, strong) AVPlayerLayer *playerLayer;
@@ -216,7 +242,8 @@ static UIImage *TXLoadCachedImage(NSString *path) {
     // 让视频从头播放，表现为闪烁 + 反复解大图。
     if (existing && existing.package && self.activePackage
         && [existing.package.path isEqualToString:self.activePackage.path]) {
-        existing.frame = view.bounds;
+        UIView *host = existing.host ?: view;
+        existing.frame = host.bounds;
         [existing tx_start];
         return;
     }
@@ -236,11 +263,22 @@ static UIImage *TXLoadCachedImage(NSString *path) {
         return;
     }
 
+    // 调整：优先挂进系统自己的 contentView（系统原图所在的那层），这样系统的
+    // 模糊 / 暗淡 / legibility 处理会一并作用在我们的内容上，层级也更稳；
+    // 没有 contentView 时退回挂到壁纸视图本身。
+    UIView *host = view;
+    UIView *content = [(PBUIWallpaperView *)view contentView];
+    if (content) {
+        host = content;
+    }
+
+    TXDumpHierarchyOnce(view);
+
     TXWallpaperRenderer *renderer = [[TXWallpaperRenderer alloc] initWithPackage:self.activePackage];
-    renderer.frame = view.bounds;
+    renderer.host = host;
+    renderer.frame = host.bounds;
     renderer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    // 放在最上层盖住系统静态壁纸（系统原图在 contentView 里，被不透明内容遮住即可）
-    [view addSubview:renderer];
+    [host addSubview:renderer];
     [self.renderers setObject:renderer forKey:view];
     [renderer tx_start];
 
@@ -251,11 +289,11 @@ static UIImage *TXLoadCachedImage(NSString *path) {
         [renderer addSubview:interaction];
     }
 
-    TXLog(@"已挂载: %@ (%@/%@) -> %@ (variant=%lld bounds=%@)",
+    TXLog(@"已挂载: %@ (%@/%@) -> %@ @ %@ (variant=%lld bounds=%@)",
           self.activePackage.displayName, self.activePackage.kind, renderer.mode,
-          NSStringFromClass(view.class),
+          NSStringFromClass(view.class), NSStringFromClass(host.class),
           (long long)[(PBUIWallpaperView *)view variant],
-          NSStringFromCGRect(view.bounds));
+          NSStringFromCGRect(host.bounds));
 }
 
 - (void)layoutWallpaperWithView:(UIView *)view {
