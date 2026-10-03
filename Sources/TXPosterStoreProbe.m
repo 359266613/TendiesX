@@ -69,7 +69,71 @@ static void TXProbeFilteredListing(NSString *parent, NSString *keyword, NSUInteg
     }
 }
 
-/// 扫描应用数据容器，按容器标识找出 PosterBoard / PosterKit 相关容器
+/// 参考 PosterForge 的实现，海报描述符存在：
+///   <PosterBoard 容器>/Library/Application Support/PRBPosterExtensionDataStore/<结构版本>/
+///       Extensions/<扩展ID>/descriptors/<UUID>/
+/// <结构版本> 与 <扩展ID> 随系统版本变化，所以这里定向把这几层打出来，
+/// 拿到真机上的真实值后才能正确安装 .tendies 里的 descriptors/<UUID>。
+/// 属主与权限：决定我们能否从 SpringBoard(mobile) 直接写进 PosterBoard 容器
+static NSString *TXProbeAttributes(NSString *path) {
+    NSDictionary<NSFileAttributeKey, id> *attrs =
+        [NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
+    if (!attrs) {
+        return @"(读不到属性)";
+    }
+    return [NSString stringWithFormat:@"owner=%@ mode=0%o",
+            attrs[NSFileOwnerAccountName] ?: @"?",
+            [attrs[NSFilePosixPermissions] unsignedIntValue] & 07777];
+}
+
+static void TXProbePosterBoardStore(NSString *container, NSUInteger *budget) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *support = [container stringByAppendingPathComponent:@"Library/Application Support"];
+    TXLog(@"    Application Support 下的条目：");
+
+    for (NSString *item in [fm contentsOfDirectoryAtPath:support error:NULL]) {
+        if (*budget == 0) {
+            return;
+        }
+        if (![item.lowercaseString containsString:@"store"]) {
+            continue;   // 只关心 PRBPosterExtensionDataStore 这类
+        }
+        NSString *store = [support stringByAppendingPathComponent:item];
+        TXLog(@"      [存储] %@  %@", store, TXProbeAttributes(store));
+        (*budget)--;
+
+        // 下一层通常是结构版本号（PosterForge 在 iOS 16 上写死 59）
+        for (NSString *version in [fm contentsOfDirectoryAtPath:store error:NULL]) {
+            if (*budget == 0) {
+                return;
+            }
+            NSString *versionPath = [store stringByAppendingPathComponent:version];
+            if (TXProbeIsDir(versionPath) == NO) {
+                continue;
+            }
+            TXLog(@"        结构版本: %@  %@", version, TXProbeAttributes(versionPath));
+            (*budget)--;
+
+            NSString *extensions = [versionPath stringByAppendingPathComponent:@"Extensions"];
+            for (NSString *ext in [fm contentsOfDirectoryAtPath:extensions error:NULL]) {
+                if (*budget == 0) {
+                    return;
+                }
+                NSString *extensionsEntry = [extensions stringByAppendingPathComponent:ext];
+                NSString *descriptors = [extensionsEntry stringByAppendingPathComponent:@"descriptors"];
+                NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:descriptors error:NULL];
+                TXLog(@"          扩展 %@ -> descriptors 条目数 %lu  %@",
+                      ext, (unsigned long)items.count, TXProbeAttributes(descriptors));
+                for (NSString *one in items) {
+                    TXLog(@"            已有: %@", one);
+                }
+                (*budget)--;
+            }
+        }
+    }
+}
+
+/// 扫描应用数据容器，按容器标识找出 PosterBoard 容器
 static void TXProbeAppContainers(NSUInteger *budget) {
     static NSString *const kContainerRoots[] = {
         @"/var/mobile/Containers/Data/Application",
@@ -101,9 +165,7 @@ static void TXProbeAppContainers(NSUInteger *budget) {
             }
             TXLog(@"    [命中] %@ -> %@", identifier, container);
             (*budget)--;
-            // 调整：之前写成 depth=3 / maxDepth=2，条件 depth>=maxDepth 直接返回，
-            // 结果只打了一行 "Library/"。改成从 depth=1 起、最多recursion 3 层。
-            TXProbeDump([container stringByAppendingPathComponent:@"Library"], 1, 3, budget);
+            TXProbePosterBoardStore(container, budget);
         }
     }
 }
