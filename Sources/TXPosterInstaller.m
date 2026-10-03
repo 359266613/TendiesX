@@ -124,28 +124,6 @@ static NSDictionary<NSString *, NSNumber *> *TXStoreIdentifierCounts(NSString *d
     return counts;
 }
 
-/// 本机库里是否存在「系统自带的」同 identifier 条目（版本号 >= 1000）。
-/// 只有这种情况才说明我们装的是"系统壁纸的变体"，替换旧副本才是对的。
-static BOOL TXStoreHasSystemDescriptor(NSString *descriptorsRoot, NSString *identifier) {
-    if (!identifier.length) {
-        return NO;
-    }
-    for (NSString *entry in [NSFileManager.defaultManager contentsOfDirectoryAtPath:descriptorsRoot
-                                                                             error:NULL]) {
-        if (TXIsJunkEntry(entry)) {
-            continue;
-        }
-        NSString *dir = [descriptorsRoot stringByAppendingPathComponent:entry];
-        if (!TXIsDirectory(dir)) {
-            continue;
-        }
-        if ([identifier isEqualToString:TXDescriptorIdentifierIn(dir)] && TXMaxVersionIn(dir) >= 1000) {
-            return YES;
-        }
-    }
-    return NO;
-}
-
 /// 删掉目标库里「identifier 命中且版本号 < 1000」的目录 —— 那些只可能是我们自己装的旧副本。
 /// 系统自带的同 identifier 壁纸版本号是几千，永远不碰。
 /// @return 删除的份数
@@ -179,6 +157,152 @@ static NSUInteger TXRemoveOurCopiesOfIdentifiers(NSString *descriptorsRoot,
         }
     }
     return removed;
+}
+
+#pragma mark - 给素材换一个"自己的" identifier
+
+/// .tendies 素材大多是从系统壁纸改内容做的，identifier 照抄（实测 iOS16 / 仙逆_王林 /
+/// 气质美乳女菩萨 三个素材全是 7400）。PosterBoard 认 descriptor 靠 identifier，
+/// 撞号就会表现成"装进去了、收藏里也有，但显示和生效的永远是系统那份"。
+/// 所以安装时给每个素材算一个只属于它的 identifier：
+///   · 同一素材每次算出来一样 → 重复安装仍然是"替换自己"，不堆重复项
+///   · 不同素材互不相同 → 收藏里各是各的，AutoApply 也不会再指到系统那份
+///   · 9 开头 6 位，避开 Apple 的编号段（7400 / 7410 / 7610 …）
+static NSString *TXIdentifierForMaterial(NSString *materialKey) {
+    uint32_t hash = 2166136261u;
+    for (NSUInteger i = 0; i < materialKey.length; i++) {
+        hash = (hash ^ [materialKey characterAtIndex:i]) * 16777619u;
+    }
+    return [NSString stringWithFormat:@"9%05u", hash % 100000u];
+}
+
+/// 递归把对象里出现的旧 identifier 换成新的；标题（name）一并改成素材名，
+/// 否则收藏里三条都叫 "WWDC 2022"，根本分不出哪个是哪个。
+static id TXRewritingObject(id object, NSString *oldId, NSString *newId, NSString *title) {
+    if ([object isKindOfClass:NSString.class]) {
+        NSString *text = (NSString *)object;
+        return [text containsString:oldId]
+            ? [text stringByReplacingOccurrencesOfString:oldId withString:newId]
+            : text;
+    }
+    if ([object isKindOfClass:NSArray.class]) {
+        NSMutableArray *result = [NSMutableArray arrayWithCapacity:[object count]];
+        for (id item in object) {
+            [result addObject:TXRewritingObject(item, oldId, newId, title)];
+        }
+        return result;
+    }
+    if ([object isKindOfClass:NSDictionary.class]) {
+        NSMutableDictionary *result = [NSMutableDictionary dictionaryWithCapacity:[object count]];
+        for (id key in object) {
+            id value = TXRewritingObject(object[key], oldId, newId, title);
+            if (title.length && [key isEqualToString:@"name"] && [value isKindOfClass:NSString.class]) {
+                value = title;
+            }
+            result[key] = value;
+        }
+        return result;
+    }
+    return object;
+}
+
+/// 纯文本类型的扩展名（这些里面可能带 identifier，改一遍最稳）
+static BOOL TXIsRewritableTextName(NSString *name) {
+    NSString *ext = name.pathExtension.lowercaseString;
+    return [ext isEqualToString:@"caml"] || [ext isEqualToString:@"xml"] || [ext isEqualToString:@"js"]
+        || [ext isEqualToString:@"json"] || [ext isEqualToString:@"txt"] || [ext isEqualToString:@"identifier"]
+        || ext.length == 0;
+}
+
+/// 把 descriptor 目录里的 oldId 全部换成 newId：
+///   ① 名字里带它的目录/文件（7400.WWDC_2022-390w-844h@3x~iphone.wallpaper/、…_Background-….ca 等）
+///   ② com.apple.posterkit.provider.descriptor.identifier 的内容
+///   ③ 各 plist / caml / xml / js 里的字符串（Wallpaper.plist 的 identifier 与引用到的 .ca 名字）
+/// 图片（HEIC/jpg/png）和 .atx 快照只改名字、不动内容。
+static void TXRenameIdentifierInDescriptor(NSString *directory,
+                                           NSString *oldId,
+                                           NSString *newId,
+                                           NSString *materialName) {
+    if (!oldId.length || !newId.length || [oldId isEqualToString:newId]) {
+        return;
+    }
+    NSFileManager *fm = NSFileManager.defaultManager;
+
+    // ① 先改名：深的先改，免得改了父目录之后子路径失效
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    for (NSString *relative in [fm enumeratorAtPath:directory]) {
+        if ([relative.lastPathComponent containsString:oldId]) {
+            [paths addObject:relative];
+        }
+    }
+    [paths sortUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        return [b compare:a];
+    }];
+    NSUInteger renamed = 0;
+    for (NSString *relative in paths) {
+        NSString *from = [directory stringByAppendingPathComponent:relative];
+        NSString *name = [relative.lastPathComponent stringByReplacingOccurrencesOfString:oldId
+                                                                              withString:newId];
+        NSString *to = [from.stringByDeletingLastPathComponent stringByAppendingPathComponent:name];
+        if ([fm moveItemAtPath:from toPath:to error:NULL]) {
+            renamed++;
+        }
+    }
+
+    // ② identifier 文本
+    NSString *identifierFile = [directory stringByAppendingPathComponent:
+                                @"com.apple.posterkit.provider.descriptor.identifier"];
+    [newId writeToFile:identifierFile atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+
+    // ③ 内容
+    NSUInteger rewritten = 0;
+    for (NSString *relative in [fm enumeratorAtPath:directory]) {
+        NSString *name = relative.lastPathComponent;
+        NSString *path = [directory stringByAppendingPathComponent:relative];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:path isDirectory:&isDir] || isDir) {
+            continue;
+        }
+
+        if ([name hasSuffix:@".plist"]) {
+            // plist 可能是二进制，必须按 plist 解析再写回
+            NSData *data = [NSData dataWithContentsOfFile:path];
+            id plist = data.length
+                ? [NSPropertyListSerialization propertyListWithData:data
+                                                            options:NSPropertyListMutableContainers
+                                                             format:NULL
+                                                              error:NULL]
+                : nil;
+            if (!plist) {
+                continue;
+            }
+            BOOL renameTitle = [name isEqualToString:@"Wallpaper.plist"] || [name isEqualToString:@"providerInfo.plist"];
+            id rewrittenPlist = TXRewritingObject(plist, oldId, newId, renameTitle ? materialName : nil);
+            NSData *out = [NSPropertyListSerialization dataWithPropertyList:rewrittenPlist
+                                                                    format:NSPropertyListXMLFormat_v1_0
+                                                                   options:0
+                                                                     error:NULL];
+            if (out && [out writeToFile:path atomically:YES]) {
+                rewritten++;
+            }
+            continue;
+        }
+
+        if (!TXIsRewritableTextName(name)) {
+            continue;   // 图片 / 快照不动内容
+        }
+        NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+        if (!text.length || ![text containsString:oldId]) {
+            continue;
+        }
+        NSString *updated = [text stringByReplacingOccurrencesOfString:oldId withString:newId];
+        if ([updated writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]) {
+            rewritten++;
+        }
+    }
+
+    TXLog(@"[A] 换成自己的 identifier：%@ -> %@（改名 %lu 项，改内容 %lu 个文件）",
+          oldId, newId, (unsigned long)renamed, (unsigned long)rewritten);
 }
 
 @implementation TXPosterInstaller
@@ -421,7 +545,10 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
     NSString *destRoot = [versionDir stringByAppendingPathComponent:
                           [NSString stringWithFormat:@"Extensions/%@/descriptors", extension]];
     _lastInstalledExtension = [extension copy];
-    TXLog(@"[A] 源=%@ 扩展=%@ 目标=%@", sourceDir, extension, destRoot);
+
+    // 素材名（去掉 .tendies）：用来算它自己的 identifier，也用来当收藏里的标题
+    NSString *materialName = [directory.lastPathComponent stringByDeletingPathExtension];
+    TXLog(@"[A] 素材=%@ 扩展=%@ 目标=%@", materialName, extension, destRoot);
 
     NSFileManager *fm = NSFileManager.defaultManager;
     NSError *dirError = nil;
@@ -469,7 +596,7 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
           (unsigned long)candidates.count, hasStoreMatch ? @"是" : @"否",
           filterVariants ? @"开" : @"关");
 
-    // 3) 挑要装的（空壳一律跳过：装了也是黑图）
+    // 3) 挑要装的（空壳一律跳过：装了也是黑图），并给每条算出"它自己的" identifier
     NSMutableArray<NSDictionary *> *selected = [NSMutableArray array];
     for (NSDictionary *item in candidates) {
         NSString *identifier = item[@"identifier"];
@@ -482,31 +609,33 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
                   item[@"name"], identifier.length ? identifier : @"(读不到)");
             continue;
         }
-        [selected addObject:item];
+        NSMutableDictionary *record = [item mutableCopy];
+        record[@"newIdentifier"] = identifier.length
+            ? TXIdentifierForMaterial([materialName stringByAppendingString:item[@"name"]])
+            : @"";
+        [selected addObject:record];
     }
     if (!selected.count) {
         TXLog(@"[A] 没有可装的 descriptor（源 %lu 个都被过滤了）", (unsigned long)candidates.count);
         return installed;
     }
 
-    // 4) 替换：**只清"系统同类壁纸的旧变体"**。
-    //    判据：库里已经存在同 identifier 的系统条目（版本号 >= 1000）—— 这时我们装的是它的变体，
-    //    旧变体必须删掉，否则收藏里会堆出 13 份 7400。
-    //    独立素材（库里没有系统同款）什么都不删：保持 v0.0.1-18 那种"各装各的"行为，
-    //    多个素材能共存，多余的副本交给「清理重复壁纸」处理。
+    // 4) 替换：按"它自己的 identifier"清旧副本。
+    //    因为 identifier 是按素材名算出来的固定值，所以：
+    //      · 同一个素材重复安装 → 命中同 identifier → 替换掉自己上次那份（不堆重复项）
+    //      · 不同素材 → identifier 各不相同 → 谁也不删谁（三个素材可以共存）
+    //    系统自带的条目版本号是几千，TXRemoveOurCopiesOfIdentifiers 里会主动跳过。
     NSMutableSet<NSString *> *replaceable = [NSMutableSet set];
     for (NSDictionary *item in selected) {
-        NSString *identifier = item[@"identifier"];
-        if (identifier.length && TXStoreHasSystemDescriptor(destRoot, identifier)) {
-            [replaceable addObject:identifier];
+        if (((NSString *)item[@"newIdentifier"]).length) {
+            [replaceable addObject:item[@"newIdentifier"]];
         }
     }
     NSUInteger replaced = TXRemoveOurCopiesOfIdentifiers(destRoot, replaceable);
-    TXLog(@"[A] 替换：清掉旧副本 %lu 份（可替换 identifier %lu 个）；本次装 %lu 个（源 %lu 个）",
-          (unsigned long)replaced, (unsigned long)replaceable.count,
-          (unsigned long)selected.count, (unsigned long)candidates.count);
+    TXLog(@"[A] 替换：清掉旧副本 %lu 份；本次装 %lu 个（源 %lu 个）",
+          (unsigned long)replaced, (unsigned long)selected.count, (unsigned long)candidates.count);
 
-    // 5) 复制 + 更新安装清单（清单只作记录，替换不依赖它）
+    // 5) 复制 → 换成自己的 identifier → 更新安装清单
     NSMutableArray<NSDictionary *> *manifest = [TXInstalledManifest() mutableCopy];
     [manifest filterUsingPredicate:
         [NSPredicate predicateWithBlock:^BOOL(NSDictionary *record, NSDictionary *bindings) {
@@ -515,7 +644,8 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
 
     for (NSDictionary *item in selected) {
         NSString *src = item[@"path"];
-        NSString *identifier = item[@"identifier"];
+        NSString *sourceIdentifier = item[@"identifier"];
+        NSString *installedIdentifier = item[@"newIdentifier"];
 
         // UUID 随机化：descriptor 内的文件都不引用 UUID（已逐个核对），换名安全。
         NSString *newUUID = [NSUUID UUID].UUIDString.uppercaseString;
@@ -523,15 +653,22 @@ static BOOL TXLooksLikeBundleIdentifier(NSString *name) {
 
         NSError *copyError = nil;
         if ([self tx_copyDescriptor:src to:dst error:&copyError]) {
+            // 关键一步：素材自带的 identifier 多半和系统壁纸撞号（三个素材都是 7400），
+            // 换成只属于它的那个，收藏里才会是独立的一份、显示自己的画面。
+            if (sourceIdentifier.length && installedIdentifier.length) {
+                TXRenameIdentifierInDescriptor(dst, sourceIdentifier, installedIdentifier, materialName);
+            }
+
             [installed addObject:dst];
-            if (identifier.length) {
-                [identifiers addObject:identifier];
+            if (installedIdentifier.length) {
+                [identifiers addObject:installedIdentifier];
                 [manifest addObject:@{ @"uuid": newUUID,
-                                       @"identifier": identifier,
+                                       @"identifier": installedIdentifier,
                                        @"extension": extension }];
             }
-            TXLog(@"[A] 已安装 descriptor %@ (identifier=%@) -> %@",
-                  item[@"name"], identifier.length ? identifier : @"(未读到)", newUUID);
+            TXLog(@"[A] 已安装 descriptor %@ (identifier=%@ → %@) -> %@",
+                  item[@"name"], sourceIdentifier.length ? sourceIdentifier : @"(未读到)",
+                  installedIdentifier.length ? installedIdentifier : @"(未读到)", newUUID);
         } else {
             // 失败就删掉残缺目录，免得留下一个半成品让 PosterBoard 收录
             [fm removeItemAtPath:dst error:NULL];
