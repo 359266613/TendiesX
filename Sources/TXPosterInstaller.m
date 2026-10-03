@@ -12,9 +12,12 @@ static BOOL TXIsDirectory(NSString *path) {
     return isDir;
 }
 
-/// 安装时跳过的打包残留
+/// 安装时跳过的打包残留。
+/// 注意：**不能**简单地跳过所有点开头的名字 —— descriptor 里有必需文件就叫
+/// .com.apple.posterkit.provider.contents.configurableOptions.plist，误删会让配置项丢失。
 static BOOL TXIsJunkEntry(NSString *name) {
-    return [name hasPrefix:@"."]
+    return [name isEqualToString:@".DS_Store"]
+        || [name hasPrefix:@"._"]          // macOS AppleDouble
         || [name isEqualToString:@"__MACOSX"]
         || [name isEqualToString:@"LICENSE.txt"]
         || [name isEqualToString:@"README.md"];
@@ -89,17 +92,33 @@ static BOOL TXIsJunkEntry(NSString *name) {
         return source;
     }
 
-    NSString *destination = source;
+    NSFileManager *fm = NSFileManager.defaultManager;
     TXZipArchive *zip = [TXZipArchive archiveWithContentsOfFile:source];
     if (!zip) {
         TXLog(@"[A] 不是有效的 zip: %@", source.lastPathComponent);
         return nil;
     }
+
+    // 源压缩包与目标目录同名（xx.tendies 是文件 → xx.tendies/ 是目录），
+    // 不能在已存在的文件路径上 createDirectory，所以先解到临时目录再改名。
+    // 这样中途失败也不会把用户的原压缩包弄丢。
+    NSString *destination = source;
+    NSString *temporary = [source stringByAppendingString:@".unpacking"];
+    [fm removeItemAtPath:temporary error:NULL];
+
     NSError *error = nil;
-    if (![zip extractToDirectory:destination error:&error]) {
-        TXLog(@"[A] 解包失败: %@", error.localizedDescription);
+    if (![zip extractToDirectory:temporary error:&error]) {
+        [fm removeItemAtPath:temporary error:NULL];
+        TXLog(@"[A] 解包失败: %@", error.localizedDescription ?: @"未知原因");
         return nil;
     }
+    [fm removeItemAtPath:destination error:NULL];
+    if (![fm moveItemAtPath:temporary toPath:destination error:&error]) {
+        [fm removeItemAtPath:temporary error:NULL];
+        TXLog(@"[A] 解包后改名失败: %@", error.localizedDescription);
+        return nil;
+    }
+
     TXLog(@"[A] 已解包 %@ -> %@/（%lu 项）",
           source.lastPathComponent, destination.lastPathComponent,
           (unsigned long)zip.entries.count);
