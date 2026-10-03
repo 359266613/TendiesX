@@ -32,8 +32,9 @@ BUNDLE_NAME = TendiesXPrefs
 TendiesXPrefs_FILES = TendiesXPrefs/TendiesXRootListController.m \
 	TendiesXPrefs/Cells/TXDetailCell.m \
 	Sources/TXLogger.m
+# Preferences 私有头直接用 theos 自带的那套（vendor/include/Preferences），
+# 不要自己再放一份同名的，否则会遮蔽它的 module map（报 PSSpecifier must be imported from module）
 TendiesXPrefs_CFLAGS = -fobjc-arc \
-	-I./Headers \
 	-I./TendiesXPrefs \
 	-I./Sources \
 	-Wno-error

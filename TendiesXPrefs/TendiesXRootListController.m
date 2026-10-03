@@ -11,7 +11,6 @@
 
 #import "TendiesXRootListController.h"
 #import <Preferences/PSSpecifier.h>
-#import <objc/runtime.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "TXLogger.h"
 #import "Cells/TXDetailCell.h"
@@ -20,20 +19,6 @@ static NSString * const kDomain = @"com.axs.tendiesx";   // 与 control 的 Pack
 static NSString * const kMediaDir = @"/var/mobile/Library/TendiesX";
 static NSString * const kInstallNote = @"com.axs.tendiesx/InstallPoster";
 static NSString * const kCleanupNote = @"com.axs.tendiesx/CleanupDuplicates";
-
-#pragma mark - 规格写回
-
-// 表数据源读的是 PSListController 自己的 _specifiers 实例变量：只 return 不写回时界面全白。
-// 这里按 ivar 名写，不声明 ivar（声明 ivar 等于猜内存布局，会写错偏移）。
-static void TXSetSpecifiers(PSListController *controller, NSArray *specifiers) {
-    static Ivar ivar;
-    if (!ivar) {
-        ivar = class_getInstanceVariable(PSListController.class, "_specifiers");
-    }
-    if (ivar) {
-        object_setIvar(controller, ivar, specifiers);
-    }
-}
 
 #pragma mark - 素材目录
 
@@ -63,12 +48,11 @@ static NSString *TXDisplayName(NSString *path) {
 @end
 
 @implementation TXPackageListController {
-    NSArray *_rows;
     NSArray<NSString *> *_paths;   // 与第 0 组的行一一对应
 }
 
 - (NSArray *)specifiers {
-    if (!_rows) {
+    if (!_specifiers) {
         NSString *current = [[[NSUserDefaults alloc] initWithSuiteName:kDomain] stringForKey:@"SourcePath"];
         NSMutableArray *specs = [NSMutableArray arrayWithObject:
                                  [PSSpecifier groupSpecifierWithName:@"点一下选中要安装的素材"]];
@@ -87,11 +71,10 @@ static NSString *TXDisplayName(NSString *path) {
                                                          detail:nil cell:PSTitleValueCell edit:nil]];
         }
         _paths = [paths copy];
-        _rows = [specs copy];
+        _specifiers = specs;   // 表数据源读的就是这个 ivar
         TXLog(@"面板: 素材列表 %lu 个", (unsigned long)paths.count);
     }
-    TXSetSpecifiers(self, _rows);
-    return _rows;
+    return _specifiers;
 }
 
 - (void)viewDidLoad {
@@ -101,8 +84,7 @@ static NSString *TXDisplayName(NSString *path) {
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    _rows = nil;   // 每次进来重扫，素材增删都看得见
-    _paths = nil;
+    _specifiers = nil;   // 每次进来重扫，素材增删都看得见
     [self reloadSpecifiers];
 }
 
@@ -116,8 +98,7 @@ static NSString *TXDisplayName(NSString *path) {
     [defaults synchronize];
     TXLog(@"面板: 已选中素材 %@", _paths[indexPath.row]);
 
-    _rows = nil;   // 不自动返回：把 ✓ 刷出来，用户能看到确实选过去了
-    _paths = nil;
+    // 不自动返回：把 ✓ 刷出来，用户能看到确实选过去了
     [self reloadSpecifiers];
 }
 
@@ -144,9 +125,7 @@ static NSString *TXDisplayName(NSString *path) {
 - (void)openQQGroup:(id)_;
 @end
 
-@implementation TendiesXRootListController {
-    NSArray *_rows;   // 规格缓存（plist 行 + 代码追加的「关于我们」）
-}
+@implementation TendiesXRootListController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -157,7 +136,7 @@ static NSString *TXDisplayName(NSString *path) {
 }
 
 - (NSArray *)specifiers {
-    if (!_rows) {
+    if (!_specifiers) {
         // 全部规格（开关 / 素材 / 素材操作）都在 Resources/Root.plist 里
         NSMutableArray *specs = [[self loadSpecifiersFromPlistName:@"Root" target:self] mutableCopy];
         [self fixButtonActions:specs];   // plist 的 action 没被带进来时兜一手
@@ -168,11 +147,10 @@ static NSString *TXDisplayName(NSString *path) {
         [self btn:@"TG分享频道" act:@selector(openTelegramChannel:) to:specs];
         [self btn:@"QQ交流群组" act:@selector(openQQGroup:) to:specs];
 
-        _rows = [specs copy];
-        TXLog(@"面板: 规格构建完成（%lu 行，plist + 关于我们）", (unsigned long)_rows.count);
+        _specifiers = specs;
+        TXLog(@"面板: 规格构建完成（%lu 行，plist + 关于我们）", (unsigned long)_specifiers.count);
     }
-    TXSetSpecifiers(self, _rows);
-    return _rows;
+    return _specifiers;
 }
 
 /// plist 里按钮写的是 action（Preferences 的约定）；个别版本没把 action 带进 specifier，
