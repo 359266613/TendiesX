@@ -1,16 +1,20 @@
 //
 //  TXRootListController.m
-//  设置面板：布局 / 文案 / 开关 / 按钮全部在 Resources/Root.plist 里（改文案不用重编）。
+//  设置面板分两半：
+//    · 开关 / 素材 / 安装 / 说明  → Resources/Root.plist（改文案不用重编）
+//    · 关于我们（Sileo / TG / QQ）→ 本文件里动态构建（写死在代码里，方便随时改链接）
 //
 //  这里只做四件事：
-//    1) 把 plist 里带 id 的按钮接到方法上（plist 的 action 只是给外部看的说明）；
+//    1) 在 plist 结果后面追加「关于我们」，并按 id 把按钮接到方法上；
 //    2) 刷新动态文案（"当前素材"那一行）；
 //    3) 实现按钮逻辑：安装 / 清理重复 / 选文件 / 重新扫描 / 关于我们；
 //    4) 二级页「选择素材」—— 它是扫目录得到的动态列表，只能留在代码里。
 //
 //  设计要点（都是踩过的坑，勿改回去）：
-//  1) **不要重写 -specifiers**：PSListController 会自动读 bundle 里的 Root.plist，
-//     重写反而容易把 _specifiers 写坏导致整页白屏；
+//  1) **不要从零构建 specifiers**：PSListController 会自动读 bundle 里的 Root.plist，
+//     从零构建再写回 _specifiers 很容易整页白屏。
+//     允许的重写只有一种：先 `[super specifiers]` 拿 plist 结果，再在后面追加代码里的那一段，
+//     最后写回 _specifiers —— 见下面 -specifiers；
 //  2) 开关值走控制器级 readPreferenceValue: / setPreferenceValue:specifier:
 //     （dump 确认声明在 PSViewController 上），所以 Root.plist 里只写 key、不写 defaults；
 //  3) 切换开关时不要重建 specifiers（会让正在处理的点击回弹，表现为开关自己关掉）；
@@ -200,6 +204,8 @@ static NSArray<NSString *> *gTXPackagePaths = nil;   // 与 section 0 的行一�
 @end
 
 @interface TXRootListController ()
+- (NSArray *)tx_aboutSpecifiers;
+- (BOOL)tx_hasAboutSection:(NSArray *)specifiers;
 - (void)tx_wireButtons;
 - (void)tx_refreshDynamicLabels;
 - (void)tx_installPoster:(PSSpecifier *)specifier;
@@ -254,6 +260,65 @@ static NSDictionary<NSString *, NSString *> *TXButtonSelectors(void) {
     [self tx_refreshDynamicLabels];
     gTXPackageSpecifiers = nil;   // 回到根页面时让二级页重新扫目录
     gTXPackagePaths = nil;
+}
+
+#pragma mark - specifiers（plist + 代码追加的「关于我们」）
+
+/// 唯一允许重写 specifiers 的理由：Root.plist 里放不了"关于我们"那三个按钮
+/// （链接/文案要写在代码里，方便直接改）。
+/// 做法是**先拿父类结果再追加**，绝不从零构建 —— plist 依旧是布局的唯一来源。
+- (NSArray *)specifiers {
+    NSArray *base = [super specifiers];   // 父类读 Root.plist，并缓存进 _specifiers
+    if (!base.count) {
+        // plist 读不到时不要整页空白：至少把代码里的「关于我们」显示出来，日志里也留痕
+        TXLog(@"面板: 警告 Root.plist 没读到（父类返回空），本次只显示「关于我们」");
+    } else if ([self tx_hasAboutSection:base]) {
+        return base;                      // 已经追加过了（父类缓存返回的就是追加后的那份）
+    }
+    NSArray *combined = [(base ?: @[]) arrayByAddingObjectsFromArray:[self tx_aboutSpecifiers]];
+    TXAssignSpecifiers(self, combined);   // 表数据源读的是 _specifiers，必须写回
+    TXLog(@"面板: plist %lu 行 + 代码追加「关于我们」3 行", (unsigned long)base.count);
+    return combined;
+}
+
+/// 「关于我们」——固定在代码里：要改链接 / 文案直接改这张表，不用碰 plist
+- (NSArray *)tx_aboutSpecifiers {
+    NSMutableArray *specs = [NSMutableArray array];
+
+    PSSpecifier *group = [PSSpecifier groupSpecifierWithName:@"关于我们"];
+    [group setProperty:@"aboutGroup" forKey:@"id"];
+    [specs addObject:group];
+
+    NSArray<NSArray<NSString *> *> *rows = @[
+        @[ @"sileo", @"Sileo 越狱源", @"openSileoRepo:" ],
+        @[ @"tg",    @"TG分享频道",   @"openTelegramChannel:" ],
+        @[ @"qq",    @"QQ交流群组",   @"openQQGroup:" ],
+    ];
+
+    for (NSArray<NSString *> *row in rows) {
+        PSSpecifier *spec = [PSSpecifier preferenceSpecifierNamed:row[1]
+                                                          target:self
+                                                             set:NULL
+                                                             get:NULL
+                                                          detail:nil
+                                                            cell:TXCellType(@"PSButtonCell", TXCellButton)
+                                                            edit:NULL];
+        [spec setProperty:row[0] forKey:@"id"];
+        [spec setProperty:row[2] forKey:@"action"];
+        [spec setTarget:self];
+        [spec setButtonAction:NSSelectorFromString(row[2])];
+        [specs addObject:spec];
+    }
+    return specs;
+}
+
+- (BOOL)tx_hasAboutSection:(NSArray *)specifiers {
+    for (PSSpecifier *spec in specifiers) {
+        if ([[spec propertyForKey:@"id"] isEqualToString:@"aboutGroup"]) {
+            return YES;
+        }
+    }
+    return NO;
 }
 
 /// 把 plist 里带 id 的按钮接到方法上

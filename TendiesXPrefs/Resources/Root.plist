@@ -20,7 +20,7 @@
 			<key>cell</key>
 			<string>PSSwitchCell</string>
 			<key>label</key>
-			<string>启用</string>
+			<string>启用插件</string>
 			<key>key</key>
 			<string>Enabled</string>
 			<key>default</key>
@@ -128,44 +128,6 @@
 			<key>footerText</key>
 			<string>装完去「设置 → 墙纸 → 添加新墙纸 → 收藏」里选它；开了自动生效则直接替换当前壁纸。
 运行日志：/var/mobile/Library/Logs/TendiesX.log</string>
-		</dict>
-
-		<!-- ================= 关于我们 ================= -->
-		<dict>
-			<key>cell</key>
-			<string>PSGroupSpecifier</string>
-			<key>label</key>
-			<string>关于我们</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>Sileo 越狱源</string>
-			<key>action</key>
-			<string>openSileoRepo:</string>
-			<key>id</key>
-			<string>sileo</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>TG分享频道</string>
-			<key>action</key>
-			<string>openTelegramChannel:</string>
-			<key>id</key>
-			<string>tg</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>QQ交流群组</string>
-			<key>action</key>
-			<string>openQQGroup:</string>
-			<key>id</key>
-			<string>qq</string>
 		</dict>
 
 	</array>
