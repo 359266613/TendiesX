@@ -7,6 +7,7 @@ build/
 *.dylib
 *.o
 *.a
+*.md
 
 # Xcode / macOS
 .DS_Store
